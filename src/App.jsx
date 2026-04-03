@@ -1,121 +1,124 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState, useCallback } from 'react';
+import ReactFlow, { Background, Controls, MiniMap, applyNodeChanges, applyEdgeChanges } from 'reactflow';
+import 'reactflow/dist/style.css';
+import ModNode from './components/nodes/ModNode';
 
-function App() {
-  const [count, setCount] = useState(0)
+const nodeTypes = { mod: ModNode };
+
+export default function App() {
+  const [nodes, setNodes] = useState([]);
+  const [edges, setEdges] = useState([]);
+  const [packInfo, setPackInfo] = useState(null); // Nuevo: Estado para el ADN del pack
+
+  const onNodesChange = useCallback((chs) => setNodes((nds) => applyNodeChanges(chs, nds)), []);
+  const onEdgesChange = useCallback((chs) => setEdges((eds) => applyEdgeChanges(chs, eds)), []);
+
+  const handleScanFolder = async () => {
+    if (window.electronAPI) {
+      const result = await window.electronAPI.scanMods();
+      if (!result) return;
+
+      const { mods, info } = result;
+      setPackInfo(info);
+
+      const newNodes = [];
+      const newEdges = [];
+
+      mods.forEach((mod, index) => {
+        // 1. Calculamos la posición del Mod Principal (Cuadrícula amplia)
+        const posX = (index % 4) * 450 + 100;
+        const posY = Math.floor(index / 4) * 300 + 100;
+        const modId = `mod-${index}`;
+
+        // 2. Creamos el Nodo del Mod
+        newNodes.push({
+          id: modId,
+          type: 'mod',
+          position: { x: posX, y: posY },
+          data: { 
+            label: mod.name, 
+            version: mod.version,
+            // Guardamos la cuenta para mostrarla en el nodo si quieres
+            hasConfigs: mod.configs.length > 0 
+          }
+        });
+
+        // 3. Si tiene configuraciones, las creamos como satélites
+        mod.configs.forEach((cfg, cIndex) => {
+          const cfgId = `cfg-${index}-${cIndex}`;
+          
+          // Posicionamos los archivos de config debajo del mod
+          newNodes.push({
+            id: cfgId,
+            // Estilo simplificado: más pequeño y color turquesa
+            style: { 
+              background: '#94e2d5', 
+              color: '#11111b', 
+              fontSize: '10px', 
+              width: 150,
+              borderRadius: '4px',
+              padding: '4px',
+              border: '1px solid #11111b'
+            },
+            position: { x: posX + 20, y: posY + 80 + (cIndex * 35) },
+            data: { label: `⚙️ ${cfg}` }
+          });
+
+          // 4. CREAMOS LA CONEXIÓN (La línea que los une)
+          newEdges.push({
+            id: `edge-${modId}-${cfgId}`,
+            source: modId,
+            target: cfgId,
+            animated: true, // Esto le da movimiento a la línea
+            style: { stroke: '#94e2d5', strokeWidth: 2 },
+          });
+        });
+      });
+
+      setNodes(newNodes);
+      setEdges(newEdges);
+    }
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div style={{ width: '100vw', height: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'sans-serif' }}>
+      
+      {/* BARRA SUPERIOR PROFESIONAL */}
+      <div style={{ 
+        position: 'absolute', top: 0, left: 0, right: 0, height: '70px', 
+        background: '#181825', display: 'flex', alignItems: 'center', 
+        padding: '0 20px', zIndex: 10, borderBottom: '2px solid #313244',
+        justifyContent: 'space-between'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <button onClick={handleScanFolder} style={{
+            background: '#cba6f7', color: '#11111b', border: 'none',
+            padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer'
+          }}>
+            📂 Cargar Modpack
+          </button>
+          
+          {packInfo && (
+            <div style={{ display: 'flex', gap: '15px', borderLeft: '2px solid #45475a', paddingLeft: '20px' }}>
+              <div><small style={{ color: '#89b4fa' }}>MODPACK</small><br/><b>{packInfo.name}</b></div>
+              <div><small style={{ color: '#89b4fa' }}>VERSIÓN MC</small><br/><b>{packInfo.gameVersion}</b></div>
+              <div><small style={{ color: '#89b4fa' }}>LOADER</small><br/><b>{packInfo.loader}</b></div>
+            </div>
+          )}
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
+        
+        <div style={{ textAlign: 'right' }}>
+          <b style={{ color: '#cba6f7' }}>Modpack Assist</b> v1.0
         </div>
-        <button
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      </div>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+      <div style={{ width: '100%', height: '100%', paddingTop: '70px' }}>
+        <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView>
+          <Background color="#313244" variant="dots" gap={25} size={1} />
+          <Controls />
+          <MiniMap nodeColor="#cba6f7" maskColor="rgba(30, 30, 46, 0.7)" style={{ background: '#11111b' }} />
+        </ReactFlow>
+      </div>
+    </div>
+  );
 }
-
-export default App
