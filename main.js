@@ -121,7 +121,11 @@ async function handleFolderOpen() {
       });
     }
 
-    return { mods: modsData, info: modpackInfo };
+    return { 
+      mods: modsData, 
+      info: modpackInfo, 
+      rootFiles: itemsInRoot // <-- ESTA LÍNEA ES VITAL
+    };
     
   } catch (err) {
     console.error("Error en el escaneo:", err);
