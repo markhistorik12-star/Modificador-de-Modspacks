@@ -37,7 +37,8 @@ async function handleFolderOpen() {
   let modpackInfo = {
     name: path.basename(rootPath),
     gameVersion: "1.12.2",
-    loader: "Forge"
+    loader: "Forge",
+    path: rootPath 
   };
 
   try {
@@ -103,7 +104,6 @@ async function handleFolderOpen() {
       }
 
       // --- 4. RELACIONAR CONFIGS Y SCRIPTS ---
-      // Buscamos archivos que contengan el nombre del mod en su nombre de archivo
       const searchKey = modName.toLowerCase().replace(/\s/g, '');
       const relatedConfigs = configFiles.filter(cfg => 
         cfg.toLowerCase().includes(searchKey) || cfg.toLowerCase().includes(modId)
@@ -116,15 +116,15 @@ async function handleFolderOpen() {
         id: file, 
         name: modName.replace(/[\s\-_]+$/, ''), 
         version: modVersion,
-        configs: relatedConfigs, // Ahora el mod lleva sus configs
-        scripts: relatedScripts  // Y sus scripts
+        configs: relatedConfigs, 
+        scripts: relatedScripts  
       });
     }
 
     return { 
       mods: modsData, 
       info: modpackInfo, 
-      rootFiles: itemsInRoot // <-- ESTA LÍNEA ES VITAL
+      rootFiles: itemsInRoot 
     };
     
   } catch (err) {
@@ -133,7 +133,6 @@ async function handleFolderOpen() {
   }
 }
 
-// ... resto del archivo (createWindow, app.on, etc.) se mantiene igual
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 850, title: "Modpack Assist", autoHideMenuBar: true,
@@ -144,8 +143,126 @@ function createWindow() {
   });
   win.loadURL('http://localhost:5173');
 }
+
 app.whenReady().then(() => {
   ipcMain.handle('dialog:openFolder', handleFolderOpen);
+
+  // --- 1. RUTA DEL BOT DE IA ---
+  ipcMain.handle('ask-bot', async (event, contextData, userMessage) => {
+    try {
+      const promptText = `
+        Eres 'Modpack Assist', el cerebro de Inteligencia Artificial integrado en un IDE de modding para Minecraft.
+        
+        CONTEXTO DEL ENTORNO ACTUAL:
+        - Nombre del Modpack: ${contextData.packName}
+        - Versión de Minecraft: ${contextData.mcVersion}
+        - Archivos en la raíz: ${contextData.rootFilesList}
+        - Lista de Mods Instalados: ${contextData.modNames}
+        - Archivos de Configuración Detectados: ${contextData.configFiles}
+
+        BASE DE CONOCIMIENTO Y REGLAS:
+        1. Eres un experto absoluto en todos los mods listados para la versión específica ${contextData.mcVersion}.
+        2. REGLA DE ÉPOCA: Jamás inventes mecánicas de versiones modernas en versiones antiguas. Por ejemplo, en la 1.12.2 NO existen los 'datapacks'; las configuraciones SIEMPRE están en la carpeta 'config/' y suelen ser archivos .cfg.
+        3. NO ALUCINES: Si el usuario pregunta por un mod, verifica en la 'Lista de Mods Instalados' si realmente lo tiene. Si busca una configuración, busca el nombre exacto en los 'Archivos de Configuración Detectados'.
+        4. Tono: Técnico, directo de ingeniero a ingeniero. RESPONDE SIEMPRE EN ESPAÑOL.
+
+        SISTEMA DE ACCIONES AUTOMATIZADAS (INTERFAZ):
+        Si el usuario te pide abrir, buscar o editar una configuración, incluye UNA ÚNICA etiqueta de comando AL FINAL de tu respuesta:
+        - Para abrir archivos: [ACCION: ABRIR | nombre_del_archivo.cfg]
+        - Para buscar texto dentro de los configs: [ACCION: BUSCAR_TEXTO | palabra_clave]
+        - Para editar un archivo: [ACCION: EDITAR | nombre_del_archivo.cfg | linea_vieja_exacta | linea_nueva_reemplazo]
+        
+        REGLA VITAL PARA EDITAR: NUNCA intentes usar la acción EDITAR si no estás 100% seguro de cómo está escrita la línea en el archivo original. Si no lo sabes, primero usa BUSCAR_TEXTO, analiza el resultado, y en tu SIGUIENTE respuesta usa EDITAR.
+
+        Si no requiere acción, no incluyas ninguna etiqueta.
+
+        Mensaje del usuario: "${userMessage}"
+      `;
+
+      const response = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'llama3.1', 
+          prompt: promptText,
+          stream: false 
+        })
+      });
+
+      if (!response.ok) throw new Error("Error en el servidor local de Ollama");
+
+      const data = await response.json();
+      return data.response;
+      
+    } catch (error) {
+      console.error("Error en la IA Local:", error);
+      return "Hubo un error al conectar con Ollama. ¿Asegúrate de que la aplicación de Ollama está abierta en tu computadora y que descargaste el modelo con 'ollama run llama3.1'?";
+    }
+  });
+
+  // --- 2. RUTA PARA ABRIR ARCHIVOS ---
+  ipcMain.handle('open-file', async (event, fileName, packPath) => {
+    try {
+      const targetPath = path.join(packPath, 'config', fileName);
+      const { shell } = require('electron');
+      await shell.openPath(targetPath);
+      return true;
+    } catch (err) {
+      console.error("Error abriendo archivo:", err);
+      return false;
+    }
+  });
+
+  // --- 3. RUTA PARA BUSCAR TEXTO ---
+  ipcMain.handle('search-configs', async (event, searchTerm, packPath) => {
+    try {
+      const configPath = path.join(packPath, 'config');
+      const files = await fs.readdir(configPath);
+      const cfgFiles = files.filter(f => f.endsWith('.cfg') || f.endsWith('.toml'));
+      
+      let results = [];
+
+      for (const file of cfgFiles) {
+        const filePath = path.join(configPath, file);
+        const content = await fs.readFile(filePath, 'utf-8');
+        const lines = content.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(searchTerm.toLowerCase())) {
+            results.push(`[Archivo: ${file}, Línea: ${i+1}] ${lines[i].trim()}`);
+          }
+        }
+      }
+
+      if (results.length === 0) return "No se encontraron resultados para: " + searchTerm;
+      return results.slice(0, 20).join('\n'); 
+    } catch (err) {
+      console.error("Error buscando en archivos:", err);
+      return "Hubo un error de lectura en el disco.";
+    }
+  });
+
+  // --- 4. RUTA PARA EDITAR ARCHIVOS ---
+  ipcMain.handle('edit-file', async (event, fileName, packPath, oldText, newText) => {
+    try {
+      const filePath = path.join(packPath, 'config', fileName);
+      let content = await fs.readFile(filePath, 'utf-8');
+      
+      if (!content.includes(oldText)) {
+        return { success: false, message: `Error: No pude encontrar la línea exacta "${oldText}" en el archivo.` };
+      }
+
+      content = content.replace(oldText, newText);
+      await fs.writeFile(filePath, content, 'utf-8');
+      
+      return { success: true, message: `¡Éxito! Se ha modificado ${fileName}.` };
+    } catch (err) {
+      console.error("Error editando archivo:", err);
+      return { success: false, message: "Error crítico al intentar escribir en el disco." };
+    }
+  });
+
   createWindow();
 });
+
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
