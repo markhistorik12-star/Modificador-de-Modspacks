@@ -1,39 +1,39 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import AdmZip from 'adm-zip';
 import toml from '@iarna/toml';
+import { exec } from 'child_process';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function handleFolderOpen() {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: 'Selecciona la carpeta raíz de tu Modpack',
-    properties: ['openDirectory']
-  });
+async function handleFolderOpen(event, knownPath) { 
+  let rootPath = knownPath;
 
-  if (canceled) return null;
+  if (!rootPath) {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Selecciona la carpeta raíz de tu Modpack',
+      properties: ['openDirectory']
+    });
 
-  const rootPath = filePaths[0];
+    if (canceled) return null;
+    rootPath = filePaths[0];
+  }
+
   const itemsInRoot = await fs.readdir(rootPath);
-  
+
   let modsPath = itemsInRoot.includes('mods') ? path.join(rootPath, 'mods') : rootPath;
 
-  // --- 1. ESCANEAR CARPETAS ADICIONALES (Config y Scripts) ---
   let configFiles = [];
   let scriptFiles = [];
   try {
-    if (itemsInRoot.includes('config')) {
-      configFiles = await fs.readdir(path.join(rootPath, 'config'));
-    }
-    if (itemsInRoot.includes('scripts')) {
-      scriptFiles = await fs.readdir(path.join(rootPath, 'scripts'));
-    }
+    if (itemsInRoot.includes('config')) configFiles = await fs.readdir(path.join(rootPath, 'config'));
+    if (itemsInRoot.includes('scripts')) scriptFiles = await fs.readdir(path.join(rootPath, 'scripts'));
   } catch (e) { console.log("Error leyendo carpetas de apoyo"); }
 
-  // 2. Extraer información global del Modpack
   let modpackInfo = {
     name: path.basename(rootPath),
     gameVersion: "1.12.2",
@@ -54,7 +54,6 @@ async function handleFolderOpen() {
     }
   } catch (e) { console.log("No se pudo leer archivo de instancia."); }
 
-  // 3. Escaneo de archivos .jar
   try {
     const files = await fs.readdir(modsPath);
     const jarFiles = files.filter(file => file.endsWith('.jar'));
@@ -64,7 +63,9 @@ async function handleFolderOpen() {
       const filePath = path.join(modsPath, file);
       let modName = file.replace('.jar', '');
       let modVersion = 'Desconocida';
-      let modId = modName.toLowerCase().split(/[_\-\s]/)[0]; // ID simplificado para mapeo
+      let modId = modName.toLowerCase().split(/[_\-\s]/)[0];
+
+      let iconBase64 = null;
 
       try {
         const zip = new AdmZip(filePath);
@@ -72,26 +73,36 @@ async function handleFolderOpen() {
         const forgeToml = zip.getEntry('META-INF/mods.toml');
         const mcmodInfo = zip.getEntry('mcmod.info');
 
+        let expectedLogo = 'logo.png'; 
+
         if (fabricJson) {
           const data = JSON.parse(zip.readAsText(fabricJson));
           modName = data.name || modName;
           modVersion = data.version || modVersion;
-        } 
-        else if (forgeToml) {
+          if (data.icon) expectedLogo = data.icon.replace(/^\/+/, ''); 
+        } else if (forgeToml) {
           const data = toml.parse(zip.readAsText(forgeToml));
           if (data.mods && data.mods[0]) {
             modName = data.mods[0].displayName || modName;
             modVersion = data.mods[0].version || modVersion;
+            if (data.mods[0].logoFile) expectedLogo = data.mods[0].logoFile;
           }
-        } 
-        else if (mcmodInfo) {
+        } else if (mcmodInfo) {
           try {
             let textData = zip.readAsText(mcmodInfo).replace(/\n/g, '').replace(/,(\s*[\]}])/g, '$1');
             const data = JSON.parse(textData);
             const mod = Array.isArray(data) ? data[0] : (data.modList ? data.modList[0] : data);
             modName = mod.name || modName;
             modVersion = mod.version || modVersion;
+            if (mod.logoFile) expectedLogo = mod.logoFile;
           } catch(e) {}
+        }
+
+        let iconEntry = zip.getEntry(expectedLogo) || zip.getEntry('icon.png') || zip.getEntry('logo.png') || zip.getEntry('pack.png');
+        
+        if (iconEntry) {
+          const buffer = zip.readFile(iconEntry);
+          iconBase64 = `data:image/png;base64,${buffer.toString('base64')}`;
         }
       } catch (err) {}
 
@@ -103,30 +114,21 @@ async function handleFolderOpen() {
         }
       }
 
-      // --- 4. RELACIONAR CONFIGS Y SCRIPTS ---
       const searchKey = modName.toLowerCase().replace(/\s/g, '');
-      const relatedConfigs = configFiles.filter(cfg => 
-        cfg.toLowerCase().includes(searchKey) || cfg.toLowerCase().includes(modId)
-      );
-      const relatedScripts = scriptFiles.filter(scr => 
-        scr.toLowerCase().includes(searchKey) || scr.toLowerCase().includes(modId)
-      );
+      const relatedConfigs = configFiles.filter(cfg => cfg.toLowerCase().includes(searchKey) || cfg.toLowerCase().includes(modId));
+      const relatedScripts = scriptFiles.filter(scr => scr.toLowerCase().includes(searchKey) || scr.toLowerCase().includes(modId));
 
       modsData.push({ 
         id: file, 
         name: modName.replace(/[\s\-_]+$/, ''), 
         version: modVersion,
+        icon: iconBase64,
         configs: relatedConfigs, 
         scripts: relatedScripts  
       });
     }
 
-    return { 
-      mods: modsData, 
-      info: modpackInfo, 
-      rootFiles: itemsInRoot 
-    };
-    
+    return { mods: modsData, info: modpackInfo, rootFiles: itemsInRoot };
   } catch (err) {
     console.error("Error en el escaneo:", err);
     return null;
@@ -145,124 +147,473 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  createWindow(); 
+  
   ipcMain.handle('dialog:openFolder', handleFolderOpen);
 
-  // --- 1. RUTA DEL BOT DE IA ---
-  ipcMain.handle('ask-bot', async (event, contextData, userMessage) => {
+  // --- MOTOR IA: GITHUB MODELS (GPT-4o-mini) ---
+  ipcMain.handle('ask-bot', async (event, contextData, messagesArray) => {
     try {
-      const promptText = `
-        Eres 'Modpack Assist', el cerebro de Inteligencia Artificial integrado en un IDE de modding para Minecraft.
-        
-        CONTEXTO DEL ENTORNO ACTUAL:
-        - Nombre del Modpack: ${contextData.packName}
-        - Versión de Minecraft: ${contextData.mcVersion}
-        - Archivos en la raíz: ${contextData.rootFilesList}
-        - Lista de Mods Instalados: ${contextData.modNames}
-        - Archivos de Configuración Detectados: ${contextData.configFiles}
-
-        BASE DE CONOCIMIENTO Y REGLAS:
-        1. Eres un experto absoluto en todos los mods listados para la versión específica ${contextData.mcVersion}.
-        2. REGLA DE ÉPOCA: Jamás inventes mecánicas de versiones modernas en versiones antiguas. Por ejemplo, en la 1.12.2 NO existen los 'datapacks'; las configuraciones SIEMPRE están en la carpeta 'config/' y suelen ser archivos .cfg.
-        3. NO ALUCINES: Si el usuario pregunta por un mod, verifica en la 'Lista de Mods Instalados' si realmente lo tiene. Si busca una configuración, busca el nombre exacto en los 'Archivos de Configuración Detectados'.
-        4. Tono: Técnico, directo de ingeniero a ingeniero. RESPONDE SIEMPRE EN ESPAÑOL.
-
-        SISTEMA DE ACCIONES AUTOMATIZADAS (INTERFAZ):
-        Si el usuario te pide abrir, buscar o editar una configuración, incluye UNA ÚNICA etiqueta de comando AL FINAL de tu respuesta:
-        - Para abrir archivos: [ACCION: ABRIR | nombre_del_archivo.cfg]
-        - Para buscar texto dentro de los configs: [ACCION: BUSCAR_TEXTO | palabra_clave]
-        - Para editar un archivo: [ACCION: EDITAR | nombre_del_archivo.cfg | linea_vieja_exacta | linea_nueva_reemplazo]
-        
-        REGLA VITAL PARA EDITAR: NUNCA intentes usar la acción EDITAR si no estás 100% seguro de cómo está escrita la línea en el archivo original. Si no lo sabes, primero usa BUSCAR_TEXTO, analiza el resultado, y en tu SIGUIENTE respuesta usa EDITAR.
-
-        Si no requiere acción, no incluyas ninguna etiqueta.
-
-        Mensaje del usuario: "${userMessage}"
-      `;
-
-      const response = await fetch('http://localhost:11434/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'llama3.1', 
-          prompt: promptText,
-          stream: false 
-        })
-      });
-
-      if (!response.ok) throw new Error("Error en el servidor local de Ollama");
-
-      const data = await response.json();
-      return data.response;
+      const systemPrompt = `Eres 'Modpack Assist', un experto Ingeniero de Software autónomo especializado en Minecraft.
+      CONTEXTO: Modpack "${contextData.packName}" | Versión MC: ${contextData.mcVersion}
       
-    } catch (error) {
-      console.error("Error en la IA Local:", error);
-      return "Hubo un error al conectar con Ollama. ¿Asegúrate de que la aplicación de Ollama está abierta en tu computadora y que descargaste el modelo con 'ollama run llama3.1'?";
-    }
-  });
+      REGLAS VITALES:
+      1. Tienes acceso a TODA la carpeta del modpack, no solo config.
+      2. Si necesitas ver qué archivos existen en una carpeta, usa 'listar_archivos' especificando la carpeta (ej. '.' para la raíz, 'scripts', 'config').
+      3. Al operar archivos usa RUTAS RELATIVAS (ej: 'config/infernalmobs.cfg', 'scripts/recetas.zs' o 'server.properties' si está en la raíz).
+      4. Si el usuario pide abrir algo en su editor, usa 'abrir_archivo' DIRECTAMENTE. ¡No te niegues!`;
 
-  // --- 2. RUTA PARA ABRIR ARCHIVOS ---
-  ipcMain.handle('open-file', async (event, fileName, packPath) => {
-    try {
-      const targetPath = path.join(packPath, 'config', fileName);
-      const { shell } = require('electron');
-      await shell.openPath(targetPath);
-      return true;
-    } catch (err) {
-      console.error("Error abriendo archivo:", err);
-      return false;
-    }
-  });
+      let history = Array.isArray(messagesArray) ? messagesArray : [{ role: 'user', content: messagesArray }];
+      const payload = [{ role: 'system', content: systemPrompt }, ...history];
 
-  // --- 3. RUTA PARA BUSCAR TEXTO ---
-  ipcMain.handle('search-configs', async (event, searchTerm, packPath) => {
-    try {
-      const configPath = path.join(packPath, 'config');
-      const files = await fs.readdir(configPath);
-      const cfgFiles = files.filter(f => f.endsWith('.cfg') || f.endsWith('.toml'));
-      
-      let results = [];
+      const tools = [
+        { type: "function", function: { name: "listar_archivos", description: "Lista los archivos de una carpeta. Usa '.' para la raíz, 'config' para configuraciones, 'scripts', etc.", parameters: { type: "object", properties: { folder: { type: "string" } }, required: ["folder"] } } },
+        { type: "function", function: { name: "abrir_archivo", description: "Abre un archivo. Requiere ruta relativa completa (ej: 'config/archivo.cfg' o 'server.properties').", parameters: { type: "object", properties: { filePath: { type: "string" } }, required: ["filePath"] } } },
+        { type: "function", function: { name: "leer_archivo", description: "Lee un archivo. Requiere ruta relativa completa.", parameters: { type: "object", properties: { filePath: { type: "string" } }, required: ["filePath"] } } },
+        { type: "function", function: { name: "buscar_texto", description: "Busca una palabra clave en todos los archivos de texto del modpack (config, scripts, raíz).", parameters: { type: "object", properties: { keyword: { type: "string" } }, required: ["keyword"] } } },
+        { type: "function", function: { name: "agregar_inicio", description: "Agrega texto al inicio. Requiere ruta relativa.", parameters: { type: "object", properties: { filePath: { type: "string" }, newText: { type: "string" } }, required: ["filePath", "newText"] } } },
+        { type: "function", function: { name: "agregar_final", description: "Agrega texto al final. Requiere ruta relativa.", parameters: { type: "object", properties: { filePath: { type: "string" }, newText: { type: "string" } }, required: ["filePath", "newText"] } } },
+        { type: "function", function: { name: "editar_linea", description: "Reemplaza una línea de texto. Requiere ruta relativa.", parameters: { type: "object", properties: { filePath: { type: "string" }, oldText: { type: "string" }, newText: { type: "string" } }, required: ["filePath", "oldText", "newText"] } } }
+      ];
 
-      for (const file of cfgFiles) {
-        const filePath = path.join(configPath, file);
-        const content = await fs.readFile(filePath, 'utf-8');
-        const lines = content.split('\n');
+      let responseMessage = null;
+      let maxRetries = 3;
+      let delay = 3000;
+
+      for (let i = 0; i < maxRetries; i++) {
+        const response = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `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`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: payload,
+            tools: tools,
+            tool_choice: "auto",
+            temperature: 0.1
+          })
+        });
+
+        if (response.status === 429 || response.status === 503) {
+          console.warn(`⏳ Límite de GitHub alcanzado (Intento ${i + 1}/${maxRetries}). Pausando ${delay/1000}s...`);
+          if (i === maxRetries - 1) throw new Error("Límite de GitHub persistente.");
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; 
+          continue;
+        }
+
+        if (!response.ok) throw new Error(`GitHub API Error: ${await response.text()}`);
         
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].toLowerCase().includes(searchTerm.toLowerCase())) {
-            results.push(`[Archivo: ${file}, Línea: ${i+1}] ${lines[i].trim()}`);
+        const data = await response.json();
+        responseMessage = data.choices[0].message;
+        break; 
+      }
+
+      let toolName = null;
+      let toolArgs = null;
+
+      if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
+        toolName = responseMessage.tool_calls[0].function.name;
+        const rawArgs = responseMessage.tool_calls[0].function.arguments;
+        toolArgs = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs;
+      } else if (responseMessage.content) {
+        try {
+          const jsonMatch = responseMessage.content.match(/\{[\s\S]*"name"[\s\S]*"arguments"[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.name) {
+              toolName = parsed.name;
+              toolArgs = parsed.arguments || {};
+            }
           }
+        } catch (e) {}
+      }
+
+      if (toolName) {
+        if (!contextData.packPath) return "SISTEMA: Error. No tengo la ruta del modpack.";
+
+        switch (toolName) {
+          case 'listar_archivos': 
+            const targetDir = toolArgs.folder === '.' ? '' : toolArgs.folder;
+            const dirToScan = path.join(contextData.packPath, targetDir);
+            try {
+              const scanFiles = await fs.readdir(dirToScan);
+              return `[ACCION: LISTAR_ARCHIVOS | Contenido de '${toolArgs.folder}': ${scanFiles.join(', ')}]`;
+            } catch(e) {
+              return `[ACCION: LISTAR_ARCHIVOS | Error: La carpeta '${toolArgs.folder}' no existe.]`;
+            }
+            
+          case 'abrir_archivo': 
+            const exactPath = path.join(contextData.packPath, toolArgs.filePath);
+            exec(`code "${exactPath}"`, (error) => {
+              if (error) shell.openPath(exactPath);
+            });
+            return `Ejecución: Archivo **${toolArgs.filePath}** abierto en editor.`;
+
+          case 'leer_archivo': 
+            return `[ACCION: LEER_ARCHIVO | ${toolArgs.filePath}]`;
+          case 'buscar_texto': 
+            return `[ACCION: BUSCAR_TEXTO | ${toolArgs.keyword}]`;
+          case 'agregar_inicio': 
+            return `[ACCION: AGREGAR_AL_INICIO | ${toolArgs.filePath} | ${toolArgs.newText}]`;
+          case 'agregar_final': 
+            return `[ACCION: AGREGAR_AL_FINAL | ${toolArgs.filePath} | ${toolArgs.newText}]`;
+          case 'editar_linea': 
+            return `[ACCION: EDITAR | ${toolArgs.filePath} | ${toolArgs.oldText} | ${toolArgs.newText}]`;
+          default: 
+            return "SISTEMA: Herramienta desconocida solicitada por la IA.";
         }
       }
 
-      if (results.length === 0) return "No se encontraron resultados para: " + searchTerm;
-      return results.slice(0, 20).join('\n'); 
-    } catch (err) {
-      console.error("Error buscando en archivos:", err);
-      return "Hubo un error de lectura en el disco.";
+      return responseMessage.content || "";
+      
+    } catch (error) {
+      console.error("Error en la IA:", error);
+      return `Fallo de conexión API IA: ${error.message}`;
     }
   });
 
-  // --- 4. RUTA PARA EDITAR ARCHIVOS ---
-  ipcMain.handle('edit-file', async (event, fileName, packPath, oldText, newText) => {
+  // --- MOTORES DE ARCHIVOS ---
+  ipcMain.handle('read-file', async (event, filePath, packPath) => {
     try {
-      const filePath = path.join(packPath, 'config', fileName);
-      let content = await fs.readFile(filePath, 'utf-8');
+      const targetPath = path.join(packPath, filePath);
+      const content = await fs.readFile(targetPath, 'utf-8');
+      const limitedContent = content.split('\n').slice(0, 70).join('\n');
+      return `[MUESTRA 70 LÍNEAS DE ${filePath}]\n${limitedContent}`;
+    } catch (err) { return `ERROR 404: Archivo '${filePath}' inexistente.`; }
+  });
+
+  ipcMain.handle('read-full-file', async (event, filePath, packPath) => {
+    try {
+      const targetPath = path.join(packPath, filePath);
+      const content = await fs.readFile(targetPath, 'utf-8');
+      return { success: true, content: content };
+    } catch (err) {
+      return { success: false, message: `Error leyendo el archivo.` };
+    }
+  });
+
+  ipcMain.handle('search-configs', async (event, searchTerm, packPath) => {
+    try {
+      let results = [];
+      const foldersToSearch = ['.', 'config', 'scripts', 'kubejs', 'defaultconfigs'];
+      const allowedExts = ['.cfg', '.toml', '.json', '.zs', '.js', '.txt', '.properties'];
       
-      if (!content.includes(oldText)) {
-        return { success: false, message: `Error: No pude encontrar la línea exacta "${oldText}" en el archivo.` };
+      for (const folder of foldersToSearch) {
+        const folderPath = path.join(packPath, folder);
+        try {
+          const files = await fs.readdir(folderPath);
+          const textFiles = files.filter(f => allowedExts.some(ext => f.endsWith(ext)));
+          
+          for (const file of textFiles) {
+            const content = await fs.readFile(path.join(folderPath, file), 'utf-8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].toLowerCase().includes(searchTerm.toLowerCase())) {
+                const prefix = folder === '.' ? '' : `${folder}/`;
+                results.push(`[${prefix}${file}, Línea ${i+1}]: ${lines[i].trim()}`);
+              }
+            }
+          }
+        } catch(e) {}
+      }
+      return results.length === 0 ? "Sin coincidencias." : results.slice(0, 20).join('\n'); 
+    } catch (err) { return "Error I/O en la búsqueda global."; }
+  });
+
+  ipcMain.handle('edit-file', async (event, filePath, packPath, oldText, newText) => {
+    try {
+      const targetPath = path.join(packPath, filePath);
+      let content = await fs.readFile(targetPath, 'utf-8');
+      if (!content.includes(oldText)) return { success: false, message: `Línea de origen no detectada en ${filePath}.` };
+      content = content.replace(oldText, newText);
+      await fs.writeFile(targetPath, content, 'utf-8');
+      return { success: true, message: `Modificación aplicada en ${filePath}.` };
+    } catch (err) { return { success: false, message: "Fallo I/O." }; }
+  });
+
+  ipcMain.handle('prepend-file', async (event, filePath, packPath, newText) => {
+    try {
+      const targetPath = path.join(packPath, filePath);
+      let content = await fs.readFile(targetPath, 'utf-8');
+      await fs.writeFile(targetPath, newText + '\n' + content, 'utf-8');
+      return { success: true, message: `Inyección completada en ${filePath}.` };
+    } catch (err) { return { success: false, message: "Fallo I/O." }; }
+  });
+
+  ipcMain.handle('append-file', async (event, filePath, packPath, newText) => {
+    try {
+      const targetPath = path.join(packPath, filePath);
+      let content = await fs.readFile(targetPath, 'utf-8');
+      const separator = content.endsWith('\n') ? '' : '\n';
+      await fs.writeFile(targetPath, content + separator + newText, 'utf-8');
+      return { success: true, message: `Inyección completada en ${filePath}.` };
+    } catch (err) { return { success: false, message: "Fallo I/O." }; }
+  });
+
+  ipcMain.handle('write-file', async (event, filePath, packPath, content) => {
+    try {
+      const targetPath = path.join(packPath, filePath); 
+      await fs.writeFile(targetPath, content, 'utf-8');
+      return { success: true, message: `Sobrescritura completada.` };
+    } catch (error) { return { success: false, message: `Fallo I/O.` }; }
+  });
+
+  ipcMain.handle('delete-file', async (event, filePath, packPath) => {
+    try {
+      const targetPath = path.join(packPath, filePath); 
+      await fs.access(targetPath);
+      await fs.unlink(targetPath); 
+      return { success: true, message: `Eliminación ejecutada.` };
+    } catch { return { success: false, message: `Archivo no localizado.` }; }
+  });
+
+  ipcMain.handle('rename-file', async (event, oldPathName, newPathName, packPath) => {
+    try {
+      const oldPath = path.join(packPath, oldPathName);
+      const newPath = path.join(packPath, newPathName);
+      await fs.access(oldPath);
+      await fs.rename(oldPath, newPath); 
+      return { success: true, message: `Renombrado completado.` };
+    } catch { return { success: false, message: `Origen no localizado.` }; }
+  });
+
+  // --- NUEVAS FUNCIONES DE ENTORNO VIRTUAL Y TIENDA ---
+  ipcMain.handle('create-project', async (event, projectData) => {
+    // FIX: Cambiado a mcVersion para que coincida con lo que manda React
+    const { name, mcVersion, loader } = projectData;
+
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Selecciona una CARPETA VACÍA para tu Modpack',
+      properties: ['openDirectory', 'createDirectory']
+    });
+
+    if (canceled || filePaths.length === 0) return null;
+
+    const projectPath = filePaths[0]; // Usamos la carpeta EXACTA que el usuario eligió
+
+    try {
+      // 1. Creamos la estructura base dentro de la carpeta elegida
+      await fs.mkdir(path.join(projectPath, 'mods'), { recursive: true });
+      await fs.mkdir(path.join(projectPath, 'config'), { recursive: true });
+      await fs.mkdir(path.join(projectPath, 'scripts'), { recursive: true });
+
+      // 2. Creamos un manifest.json estándar (Formato compatible con CurseForge/Prism)
+      const manifest = { 
+        name: name, 
+        version: "1.0.0",
+        minecraft: {
+          version: mcVersion,
+          modLoaders: [{ id: `${loader.toLowerCase()}-latest`, primary: true }]
+        },
+        manifestType: "minecraftModpack",
+        manifestVersion: 1,
+        // Variables internas para tu app
+        _appData: { loader: loader } 
+      };
+      
+      await fs.writeFile(path.join(projectPath, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+      return { 
+        mods: [], 
+        info: { name, gameVersion: mcVersion, loader, path: projectPath }, 
+        rootFiles: ['mods', 'config', 'scripts', 'manifest.json'] 
+      };
+    } catch (err) {
+      console.error("Error creando proyecto:", err);
+      return null;
+    }
+  });
+
+  // 3. Buscador Dinámico (Respeta el Loader)
+  ipcMain.handle('search-mods-online', async (event, query, loader, sortBy = 'downloads', category = '') => {
+    try {
+      const safeLoader = loader ? loader.toLowerCase() : "forge";
+      
+      // Construimos los filtros (facets). El loader es obligatorio.
+      let facetsArray = [[`categories:${safeLoader}`]];
+      
+      // Si el usuario eligió una categoría (ej: "technology"), la agregamos al filtro
+      if (category) {
+        facetsArray.push([`categories:${category}`]);
       }
 
-      content = content.replace(oldText, newText);
-      await fs.writeFile(filePath, content, 'utf-8');
+      const encodedFacets = encodeURIComponent(JSON.stringify(facetsArray));
+      const encodedQuery = encodeURIComponent(query || '');
+
+      // Limitamos a 15 resultados para que la vitrina se vea más llena
+      const url = `https://api.modrinth.com/v2/search?query=${encodedQuery}&facets=${encodedFacets}&index=${sortBy}&limit=1500`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Error en la API de Modrinth");
       
-      return { success: true, message: `¡Éxito! Se ha modificado ${fileName}.` };
+      const data = await res.json();
+      return { success: true, results: data.hits };
+    } catch (err) { return { success: false, message: err.message }; }
+  });
+
+  // 4. Versiones Dinámicas (Respeta versión de MC y Loader)
+  ipcMain.handle('get-mod-versions', async (event, projectId, gameVersion, loader) => {
+    try {
+      const res = await fetch(`https://api.modrinth.com/v2/project/${projectId}/version`);
+      const versions = await res.json();
+      const safeLoader = loader ? loader.toLowerCase() : "forge";
+
+      // Filtro estricto: Debe coincidir la versión del juego Y el mod loader
+      const validVersions = versions.filter(v => 
+        v.loaders.includes(safeLoader) && v.game_versions.includes(gameVersion)
+      );
+
+      const formattedVersions = validVersions.map(v => ({
+        id: v.id, name: v.name, version_number: v.version_number,
+        date: new Date(v.date_published).toLocaleDateString(),
+        dependencies: v.dependencies.filter(d => d.dependency_type === 'required')
+      }));
+
+      return { success: true, versions: formattedVersions };
+    } catch (err) { return { success: false, message: err.message }; }
+  });
+
+  // 5. Descargar la versión correcta usando versionId
+  ipcMain.handle('download-mod', async (event, versionId, packPath) => {
+    try {
+      const res = await fetch(`https://api.modrinth.com/v2/version/${versionId}`);
+      const versionData = await res.json();
+
+      const fileInfo = versionData.files.find(f => f.primary) || versionData.files[0];
+
+      const modRes = await fetch(fileInfo.url);
+      const buffer = await modRes.arrayBuffer();
+      
+      const destPath = path.join(packPath, 'mods', fileInfo.filename);
+      await fs.writeFile(destPath, Buffer.from(buffer));
+
+      return { success: true, fileName: fileInfo.filename };
     } catch (err) {
-      console.error("Error editando archivo:", err);
-      return { success: false, message: "Error crítico al intentar escribir en el disco." };
+      console.error(err);
+      return { success: false, message: "Fallo de red al descargar." };
     }
   });
 
-  createWindow();
-});
+  ipcMain.handle('diagnose-modpack', async (event, packPath) => {
+    try {
+      const modsPath = path.join(packPath, 'mods');
+      const files = await fs.readdir(modsPath);
+      const jarFiles = files.filter(f => f.endsWith('.jar'));
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+      if (jarFiles.length === 0) throw new Error("No hay mods para analizar.");
+
+      // 1. Leer los parámetros base del modpack
+      let packVersion = "1.20.1", packLoader = "forge";
+      try {
+         const manifest = JSON.parse(await fs.readFile(path.join(packPath, 'manifest.json'), 'utf-8'));
+         packVersion = manifest.minecraft?.version || manifest.gameVersion || packVersion;
+         const loaderStr = manifest.minecraft?.modLoaders?.[0]?.id || manifest._appData?.loader || packLoader;
+         packLoader = loaderStr.toLowerCase().includes('fabric') ? 'fabric' : (loaderStr.toLowerCase().includes('neoforge') ? 'neoforge' : 'forge');
+      } catch(e) {}
+
+      // 2. Calcular los Hashes SHA-1 de todos los archivos .jar
+      const fileHashes = {};
+      for (const file of jarFiles) {
+        const buffer = await fs.readFile(path.join(modsPath, file));
+        const hash = crypto.createHash('sha1').update(buffer).digest('hex');
+        fileHashes[hash] = file;
+      }
+      const hashArray = Object.keys(fileHashes);
+
+      // 3. Consultar la API de Modrinth en masa
+      const res = await fetch('https://api.modrinth.com/v2/version_files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hashes: hashArray, algorithm: "sha1" })
+      });
+
+      if (!res.ok) throw new Error("Fallo de conexión con Modrinth API.");
+      const data = await res.json(); 
+
+      const errors = [];
+      const warnings = [];
+      let okCount = 0;
+
+      // Extraer los IDs de proyecto instalados para validar dependencias
+      const installedProjectIds = new Set();
+      Object.values(data).forEach(version => installedProjectIds.add(version.project_id));
+
+      // 4. Analizar los resultados
+      for (const hash of hashArray) {
+        const fileName = fileHashes[hash];
+        const versionData = data[hash];
+
+        if (!versionData) {
+          warnings.push(`⚠️ "${fileName}" es desconocido (No está en la base de datos de Modrinth). Revisa su compatibilidad manualmente.`);
+          continue;
+        }
+
+        let isOk = true;
+
+        // Validar Versión de Minecraft
+        if (!versionData.game_versions.includes(packVersion)) {
+          errors.push(`❌ [VERSIÓN] "${fileName}" es para MC ${versionData.game_versions[0] || '?'}, pero tu pack usa ${packVersion}.`);
+          isOk = false;
+        }
+
+        // Validar Loader (Forge / Fabric)
+        const vLoaders = versionData.loaders.map(l => l.toLowerCase());
+        if (!vLoaders.includes(packLoader)) {
+          errors.push(`❌ [LOADER] "${fileName}" es exclusivo de ${vLoaders.join('/')}, pero tu pack usa ${packLoader}.`);
+          isOk = false;
+        }
+
+        // Validar Dependencias Obligatorias
+        if (versionData.dependencies) {
+           for (const dep of versionData.dependencies) {
+              if (dep.dependency_type === 'required' && dep.project_id && !installedProjectIds.has(dep.project_id)) {
+                 errors.push(`❌ [FALTA DEPENDENCIA] "${fileName}" requiere un mod obligatorio que no tienes instalado.`);
+                 isOk = false;
+              }
+           }
+        }
+
+        if (isOk) okCount++;
+      }
+
+      return { success: true, report: { errors, warnings, okCount, total: jarFiles.length } };
+
+    } catch (error) {
+      console.error(error);
+      return { success: false, message: error.message };
+    }
+  });
+  // --- 6. EXPORTADOR DE MODPACKS ---
+  ipcMain.handle('export-modpack', async (event, packPath, packName) => {
+    try {
+      // Creamos un nuevo archivo ZIP
+      const zip = new AdmZip();
+      
+      // Metemos toda la carpeta de tu proyecto dentro del ZIP
+      zip.addLocalFolder(packPath);
+      
+      // Lo guardamos una carpeta más atrás de donde está tu proyecto
+      // Ej: Si está en C:/Juegos/MiPack, el zip se guarda en C:/Juegos/MiPack_Exportado.zip
+      const exportPath = path.join(path.dirname(packPath), `${packName}_Exportado.zip`);
+      zip.writeZip(exportPath);
+      
+      // Le decimos a Windows que abra la carpeta y seleccione el archivo para que el usuario lo vea
+      shell.showItemInFolder(exportPath);
+      
+      return { success: true, path: exportPath };
+    } catch (error) {
+      console.error(error);
+      return { success: false, message: error.message };
+    }
+  });
+
+
+
+}); // <-- FIN DEL BLOQUE APP.WHENREADY
+
+app.on('window-all-closed', () => { 
+  if (process.platform !== 'darwin') app.quit(); 
+});

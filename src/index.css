@@ -7,3 +7,16 @@ html, body, #root {
   overflow: hidden; /* Evita barras de scroll innecesarias */
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
 }
+
+.app-container {
+  display: flex;
+  height: 100vh;
+}
+.main-content {
+  flex: 70%; /* El 70% de la pantalla para tus mods/archivos */
+}
+.sidebar-bot {
+  flex: 30%; /* El 30% para tu Asistente Copilot */
+  border-left: 1px solid #333;
+  background-color: #1e1e1e; /* Color de fondo tipo VS Code */
+}
