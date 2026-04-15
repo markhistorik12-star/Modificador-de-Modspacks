@@ -29,4 +29,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   downloadMod: (versionId, packPath) => ipcRenderer.invoke('download-mod', versionId, packPath),
   diagnoseModpack: (packPath) => ipcRenderer.invoke('diagnose-modpack', packPath),
   exportModpack: (packPath, packName) => ipcRenderer.invoke('export-modpack', packPath, packName),
+  installModRecursively: (versionId, packVersion, packLoader, packPath) => ipcRenderer.invoke('install-mod-recursively', versionId, packVersion, packLoader, packPath),
+  getGameVersions: () => ipcRenderer.invoke('get-game-versions'),
 });

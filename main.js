@@ -114,9 +114,19 @@ async function handleFolderOpen(event, knownPath) {
         }
       }
 
-      const searchKey = modName.toLowerCase().replace(/\s/g, '');
-      const relatedConfigs = configFiles.filter(cfg => cfg.toLowerCase().includes(searchKey) || cfg.toLowerCase().includes(modId));
-      const relatedScripts = scriptFiles.filter(scr => scr.toLowerCase().includes(searchKey) || scr.toLowerCase().includes(modId));
+      // NORMALIZACIÓN: Quitamos espacios, guiones y guiones bajos de todos lados para forzar coincidencias
+      const cleanModName = modName.toLowerCase().replace(/[\s_\-]/g, '');
+      const cleanModId = modId.toLowerCase().replace(/[\s_\-]/g, '');
+
+      const relatedConfigs = configFiles.filter(cfg => {
+        const cleanCfg = cfg.toLowerCase().replace(/[\s_\-]/g, '');
+        return cleanCfg.includes(cleanModName) || cleanCfg.includes(cleanModId);
+      });
+
+      const relatedScripts = scriptFiles.filter(scr => {
+        const cleanScr = scr.toLowerCase().replace(/[\s_\-]/g, '');
+        return cleanScr.includes(cleanModName) || cleanScr.includes(cleanModId);
+      });
 
       modsData.push({ 
         id: file, 
@@ -427,31 +437,75 @@ app.whenReady().then(() => {
     }
   });
 
-  // 3. Buscador Dinámico (Respeta el Loader)
+  // --- BUSCADOR HÍBRIDO: MODRINTH + CURSEFORGE ---
   ipcMain.handle('search-mods-online', async (event, query, loader, sortBy = 'downloads', category = '') => {
+    const safeLoader = loader ? loader.toLowerCase() : "forge";
+    const modloaderId = safeLoader === 'forge' ? 1 : (safeLoader === 'fabric' ? 4 : 5);
+    
+    // ⚠️ REEMPLAZA ESTO CON LA LLAVE QUE TE DIO "ÉXITO" EN LA PRUEBA ANTERIOR ⚠️
+    const CF_API_KEY = '$2a$10$e8JaO6E5tXoo0ygUDpETIOnaTMDDC3Og6Cp8KavfjoaqyKejw/chm'; 
+
     try {
-      const safeLoader = loader ? loader.toLowerCase() : "forge";
-      
-      // Construimos los filtros (facets). El loader es obligatorio.
+      // --- 1. PETICIÓN A MODRINTH (Fuente Principal) ---
       let facetsArray = [[`categories:${safeLoader}`]];
+      if (category) facetsArray.push([`categories:${category}`]);
       
-      // Si el usuario eligió una categoría (ej: "technology"), la agregamos al filtro
-      if (category) {
-        facetsArray.push([`categories:${category}`]);
+      const modrinthUrl = `https://api.modrinth.com/v2/search?query=${query}&facets=${encodeURIComponent(JSON.stringify(facetsArray))}&index=${sortBy}&limit=1000`;
+      const modrinthRes = await fetch(modrinthUrl);
+      const modrinthData = await modrinthRes.json();
+
+      const modrinthResults = modrinthData.hits.map(mod => ({
+        project_id: mod.project_id,
+        title: mod.title,
+        description: mod.description,
+        icon_url: mod.icon_url,
+        author: mod.author,
+        downloads: mod.downloads,
+        source: 'modrinth'
+      }));
+
+      // --- 2. PETICIÓN A CURSEFORGE (Fuente Secundaria con Protección) ---
+      let curseResults = [];
+      try {
+        const cfSort = sortBy === 'downloads' ? 4 : (sortBy === 'newest' ? 2 : 1);
+        const cfUrl = `https://api.curseforge.com/v1/mods/search?gameId=432&classId=6&searchFilter=${query}&modLoaderType=${modloaderId}&sortField=${cfSort}&sortOrder=desc&pageSize=10`;
+        
+        const cfRes = await fetch(cfUrl, {
+          headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' }
+        });
+
+        // 🛡️ EL ESCUDO: Solo intentamos leer el JSON si CurseForge nos dio acceso (Respuesta 200 OK)
+        if (cfRes.ok) {
+          const cfData = await cfRes.json();
+          curseResults = cfData.data.map(mod => ({
+            project_id: String(mod.id),
+            title: mod.name,
+            description: mod.summary,
+            icon_url: mod.logo ? mod.logo.thumbnailUrl : null,
+            author: mod.authors[0]?.name || 'Unknown',
+            downloads: mod.downloadCount,
+            source: 'curseforge'
+          }));
+        } else {
+          // Si da Forbidden (403), leemos el error como texto simple para evitar que la app explote
+          const errorText = await cfRes.text();
+          console.warn(`⚠️ CurseForge rechazó la conexión. (${cfRes.status}): ${errorText}`);
+        }
+      } catch (cfError) {
+        console.warn("⚠️ No se pudo conectar a CurseForge:", cfError.message);
       }
 
-      const encodedFacets = encodeURIComponent(JSON.stringify(facetsArray));
-      const encodedQuery = encodeURIComponent(query || '');
+      // --- 3. MEZCLAMOS LOS DATOS EXITOSOS ---
+      const combined = [...modrinthResults, ...curseResults];
+      // Filtramos duplicados por nombre
+      const uniqueResults = Array.from(new Map(combined.map(item => [item.title.toLowerCase(), item])).values());
 
-      // Limitamos a 15 resultados para que la vitrina se vea más llena
-      const url = `https://api.modrinth.com/v2/search?query=${encodedQuery}&facets=${encodedFacets}&index=${sortBy}&limit=1500`;
-
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Error en la API de Modrinth");
+      return { success: true, results: uniqueResults };
       
-      const data = await res.json();
-      return { success: true, results: data.hits };
-    } catch (err) { return { success: false, message: err.message }; }
+    } catch (err) {
+      console.error("Error crítico en el buscador:", err);
+      return { success: false, message: "Fallo de conexión principal." };
+    }
   });
 
   // 4. Versiones Dinámicas (Respeta versión de MC y Loader)
@@ -536,6 +590,7 @@ app.whenReady().then(() => {
       const errors = [];
       const warnings = [];
       let okCount = 0;
+      const fileStatusMap = {};
 
       // Extraer los IDs de proyecto instalados para validar dependencias
       const installedProjectIds = new Set();
@@ -556,6 +611,7 @@ app.whenReady().then(() => {
         // Validar Versión de Minecraft
         if (!versionData.game_versions.includes(packVersion)) {
           errors.push(`❌ [VERSIÓN] "${fileName}" es para MC ${versionData.game_versions[0] || '?'}, pero tu pack usa ${packVersion}.`);
+          fileStatusMap[fileName.toLowerCase()] = 'error'; // <--- NUEVO
           isOk = false;
         }
 
@@ -563,6 +619,7 @@ app.whenReady().then(() => {
         const vLoaders = versionData.loaders.map(l => l.toLowerCase());
         if (!vLoaders.includes(packLoader)) {
           errors.push(`❌ [LOADER] "${fileName}" es exclusivo de ${vLoaders.join('/')}, pero tu pack usa ${packLoader}.`);
+          fileStatusMap[fileName.toLowerCase()] = 'error'; // <--- NUEVO
           isOk = false;
         }
 
@@ -571,21 +628,27 @@ app.whenReady().then(() => {
            for (const dep of versionData.dependencies) {
               if (dep.dependency_type === 'required' && dep.project_id && !installedProjectIds.has(dep.project_id)) {
                  errors.push(`❌ [FALTA DEPENDENCIA] "${fileName}" requiere un mod obligatorio que no tienes instalado.`);
+                 fileStatusMap[fileName.toLowerCase()] = 'error'; // <--- NUEVO
                  isOk = false;
               }
            }
         }
 
-        if (isOk) okCount++;
+        // Antes de que termine el if(isOk), si todo fue bien:
+        if (isOk) {
+            okCount++;
+            fileStatusMap[fileName.toLowerCase()] = 'ok'; // <--- NUEVO
+        }
       }
 
-      return { success: true, report: { errors, warnings, okCount, total: jarFiles.length } };
+      return { success: true, report: { errors, warnings, okCount, total: jarFiles.length, fileStatusMap } }; 
 
     } catch (error) {
       console.error(error);
       return { success: false, message: error.message };
     }
   });
+
   // --- 6. EXPORTADOR DE MODPACKS ---
   ipcMain.handle('export-modpack', async (event, packPath, packName) => {
     try {
@@ -606,6 +669,81 @@ app.whenReady().then(() => {
       return { success: true, path: exportPath };
     } catch (error) {
       console.error(error);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('install-mod-recursively', async (event, initialVersionId, packVersion, packLoader, packPath) => {
+    const downloadedIds = new Set();
+    const logs = [];
+
+    // Función recursiva interna
+    const processDependencyTree = async (versionId) => {
+      if (downloadedIds.has(versionId)) return;
+      downloadedIds.add(versionId);
+
+      try {
+        // 1. Obtenemos los datos de esta versión
+        const res = await fetch(`https://api.modrinth.com/v2/version/${versionId}`);
+        if (!res.ok) throw new Error("No se encontró la versión en Modrinth.");
+        const vData = await res.json();
+
+        // 2. Descargamos el archivo físico
+        const fileInfo = vData.files.find(f => f.primary) || vData.files[0];
+        const modRes = await fetch(fileInfo.url);
+        const buffer = await modRes.arrayBuffer();
+        const destPath = path.join(packPath, 'mods', fileInfo.filename);
+        await fs.writeFile(destPath, Buffer.from(buffer));
+        
+        logs.push(`✅ Descargado: ${fileInfo.filename}`);
+
+        // 3. LA MAGIA RECURSIVA: Revisamos sus dependencias
+        if (vData.dependencies && vData.dependencies.length > 0) {
+          for (const dep of vData.dependencies) {
+            // Solo bajamos las que son obligatorias ('required')
+            if (dep.dependency_type === 'required') {
+              if (dep.version_id) {
+                // Si el autor especificó una versión exacta, bajamos esa
+                await processDependencyTree(dep.version_id);
+              } else if (dep.project_id) {
+                // Si solo especificó el mod, buscamos la mejor versión para TU Forge y TU 1.20.1
+                const safeLoader = packLoader.toLowerCase() === 'neoforge' ? 'forge' : packLoader.toLowerCase();
+                const searchUrl = `https://api.modrinth.com/v2/project/${dep.project_id}/version?loaders=["${safeLoader}"]&game_versions=["${packVersion}"]`;
+                const depRes = await fetch(searchUrl);
+                const depVersions = await depRes.json();
+                
+                if (depVersions.length > 0) {
+                  await processDependencyTree(depVersions[0].id); // Llamada recursiva con la versión correcta
+                } else {
+                  logs.push(`⚠️ No hay versión compatible de la dependencia (ID: ${dep.project_id})`);
+                }
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logs.push(`❌ Fallo al procesar un nodo del árbol: ${err.message}`);
+      }
+    };
+
+    // Iniciamos la reacción en cadena
+    await processDependencyTree(initialVersionId);
+    return { success: true, logs };
+  });
+
+  // --- 10. OBTENER LISTA DE VERSIONES DE MINECRAFT ---
+  ipcMain.handle('get-game-versions', async () => {
+    try {
+      const res = await fetch('https://api.modrinth.com/v2/tag/game_version');
+      if (!res.ok) throw new Error("Fallo de red");
+      
+      const versions = await res.json();
+      
+      // Filtramos para obtener solo las versiones completas (Release) y descartar Snapshots/Alphas si quieres,
+      // pero para dar la experiencia completa, enviaremos todo y que el frontend decida.
+      return { success: true, versions: versions };
+    } catch (error) {
+      console.error("Error al obtener versiones:", error);
       return { success: false, message: error.message };
     }
   });

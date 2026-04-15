@@ -55,6 +55,7 @@ export default function App() {
   // Estado para el modal de Nuevo Proyecto
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ name: '', mcVersion: '1.20.1', loader: 'Forge' });
+  const [availableGameVersions, setAvailableGameVersions] = useState([]); // <--- NUEVO ESTADO
 
   // --- ESTADOS DE LOS BUSCADORES ---
   const [searchTerm, setSearchTerm] = useState('');
@@ -274,6 +275,20 @@ export default function App() {
     }
   }, [activeTab, sortBy, modCategory]);
 
+  useEffect(() => {
+    const fetchVersions = async () => {
+      if (isCreatingProject && availableGameVersions.length === 0 && window.electronAPI) {
+        const result = await window.electronAPI.getGameVersions();
+        if (result && result.success) {
+          // Filtramos solo las versiones "release" (oficiales) para no llenar la lista de snapshots
+          const releases = result.versions.filter(v => v.version_type === 'release');
+          setAvailableGameVersions(releases);
+        }
+      }
+    };
+    fetchVersions();
+  }, [isCreatingProject]);
+
   // 2. Buscador Actualizado (¡Sin el candado de texto vacío!)
   const handleSearchOnline = async () => {
     if (!window.electronAPI || !packInfo) return; 
@@ -288,6 +303,8 @@ export default function App() {
     if (result && result.success) setOnlineResults(result.results);
     setIsSearchingOnline(false);
   };
+
+
 
   // ACTUALIZA LA BÚSQUEDA DE VERSIONES PARA ENVIAR EL LOADER
   const handleSelectModVersions = async (projectId, modTitle) => {
@@ -309,48 +326,29 @@ export default function App() {
     if (!window.electronAPI || !packInfo || !versionSelectorModal) return;
     
     const modTitle = versionSelectorModal.title;
-    setVersionSelectorModal(null); // Cierra el modal
+    setVersionSelectorModal(null); 
 
     let downloadDeps = false;
-    
-    // 1. Si hay dependencias, le preguntamos al usuario si quiere instalarlas
     if (version.dependencies && version.dependencies.length > 0) {
-      downloadDeps = window.confirm(`⚠️ El mod "${modTitle}" necesita ${version.dependencies.length} dependencia(s) obligatoria(s) para funcionar.\n\n¿Deseas que Modpack Assist las descargue e instale automáticamente por ti?`);
+      downloadDeps = window.confirm(`⚠️ "${modTitle}" necesita dependencias obligatorias.\n\n¿Deseas que el Algoritmo Recursivo las busque, filtre por la versión ${packInfo.gameVersion} y las instale automáticamente?`);
     }
 
     try {
-      // 2. Descargamos el mod principal
-      const mainResult = await window.electronAPI.downloadMod(version.id, packInfo.path);
-      if (!mainResult || !mainResult.success) throw new Error(mainResult?.message || "Fallo en la descarga principal.");
-
-      // 3. Descargamos las dependencias si el usuario aceptó
       if (downloadDeps) {
-        for (const dep of version.dependencies) {
-          let depVersionId = dep.version_id;
-
-          // Magia: Si Modrinth no nos da una versión exacta, usamos tu buscador
-          // interno para hallar la versión de la dependencia más reciente que sea compatible 
-          // con el loader y la versión de tu modpack
-          if (!depVersionId && dep.project_id) {
-            const res = await window.electronAPI.getModVersions(dep.project_id, packInfo.gameVersion, packInfo.loader);
-            if (res && res.success && res.versions.length > 0) {
-              depVersionId = res.versions[0].id;
-            }
-          }
-
-          // Si logramos resolver la versión, la descargamos silenciosamente
-          if (depVersionId) {
-            await window.electronAPI.downloadMod(depVersionId, packInfo.path);
-          }
-        }
+        // Usamos el nuevo instalador recursivo
+        alert(`Iniciando descarga recursiva de ${modTitle} y su árbol de dependencias...`);
+        const result = await window.electronAPI.installModRecursively(version.id, packInfo.gameVersion, packInfo.loader, packInfo.path);
+        console.log("Log de instalación:", result.logs);
+      } else {
+        // Solo instalamos el principal
+        await window.electronAPI.downloadMod(version.id, packInfo.path);
       }
 
-      // 4. Refrescamos el ecosistema visual
+      // Refrescamos el ecosistema visual
       const scanResult = await window.electronAPI.scanMods(packInfo.path);
       if (scanResult) processScanResult(scanResult);
       
-      alert(`✅ ¡${modTitle} ${downloadDeps ? 'y sus dependencias se instalaron' : 'se instaló'} correctamente! Revisa el lienzo.`);
-
+      alert(`✅ ¡Instalación de ${modTitle} completada! Revisa tu lienzo de mods.`);
     } catch (err) {
       alert(`❌ Error al instalar: ${err.message}`);
     }
@@ -570,10 +568,35 @@ export default function App() {
     
     if (result && result.success) {
       setDiagnosticReport(result.report);
+      
+      // Recorremos todos los nodos y vemos si su nombre de archivo coincide con un error
+      setNodes(nds => nds.map(node => {
+        if (node.type === 'mod') {
+          // Buscamos si el nombre del mod coincide con algún archivo que dio error
+          const hasError = Object.entries(result.report.fileStatusMap).some(([fileName, status]) => 
+            status === 'error' && fileName.includes(node.data.label.toLowerCase().replace(/\s/g, ''))
+          );
+
+          if (hasError) {
+            return {
+              ...node,
+              style: { ...node.style, border: '3px solid #f38ba8', boxShadow: '0 0 20px rgba(243, 139, 168, 0.8)' } // Rojo brillante
+            };
+          } else {
+            return {
+              ...node,
+              style: { ...node.style, border: '2px solid #a6e3a1', boxShadow: '0 0 10px rgba(166, 227, 161, 0.3)' } // Verde salud
+            };
+          }
+        }
+        return node;
+      }));
+      
     } else {
       alert(`Error en el diagnóstico: ${result?.message}`);
     }
-  }
+  };
+
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'sans-serif', overflow: 'hidden' }}>
@@ -604,7 +627,24 @@ export default function App() {
               <div style={{ display: 'flex', gap: '15px' }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Versión de Minecraft</label>
-                  <input type="text" value={newProjectData.mcVersion} onChange={e => setNewProjectData({...newProjectData, mcVersion: e.target.value})} placeholder="Ej: 1.20.1, 1.12.2..." style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none' }} />
+                  
+                  {/* EL NUEVO SELECTOR INTELIGENTE */}
+                  <select 
+                    value={newProjectData.mcVersion} 
+                    onChange={e => setNewProjectData({...newProjectData, mcVersion: e.target.value})} 
+                    style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', cursor: 'pointer' }}
+                  >
+                    {availableGameVersions.length > 0 ? (
+                      availableGameVersions.map(v => (
+                        <option key={v.version} value={v.version}>
+                          {v.version}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="1.20.1">Cargando versiones...</option>
+                    )}
+                  </select>
+
                 </div>
                 
                 <div style={{ flex: 1 }}>
@@ -613,6 +653,7 @@ export default function App() {
                     <option value="Forge">Forge</option>
                     <option value="Fabric">Fabric</option>
                     <option value="NeoForge">NeoForge</option>
+                    <option value="Quilt">Quilt</option>
                   </select>
                 </div>
               </div>
@@ -1122,8 +1163,24 @@ export default function App() {
                   
                   {/* Info */}
                   <div style={{ flex: 1 }}>
-                    <h3 style={{ margin: '0 0 5px 0', color: '#cdd6f4', fontSize: '20px' }}>{mod.title}</h3>
+                    
+                    {/* TÍTULO Y ETIQUETA DE PLATAFORMA */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                      <h3 style={{ margin: 0, color: '#cdd6f4', fontSize: '20px' }}>{mod.title}</h3>
+                      <span style={{ 
+                        fontSize: '10px', 
+                        padding: '2px 6px', 
+                        borderRadius: '4px', 
+                        background: mod.source === 'modrinth' ? '#a6e3a1' : '#f9e2af',
+                        color: '#11111b',
+                        fontWeight: 'bold'
+                      }}>
+                        {mod.source ? mod.source.toUpperCase() : 'MODRINTH'}
+                      </span>
+                    </div>
+
                     <p style={{ margin: '0 0 10px 0', color: '#a6adc8', fontSize: '14px', lineHeight: '1.4' }}>{mod.description}</p>
+                    
                     <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#6c7086' }}>
                       <span>👤 {mod.author}</span>
                       <span>⬇️ {mod.downloads.toLocaleString()} descargas</span>
