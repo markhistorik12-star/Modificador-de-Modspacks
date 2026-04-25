@@ -2,15 +2,15 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import ReactFlow, { Background, Controls, MiniMap, applyNodeChanges, applyEdgeChanges } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ModNode from './components/nodes/ModNode';
-import GroupNode from './components/nodes/GroupNode'; 
-import ConfigEditor from './components/ConfigEditor'; 
+import GroupNode from './components/nodes/GroupNode';
+import ConfigEditor from './components/ConfigEditor';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const nodeTypes = { mod: ModNode, group: GroupNode };
-// --- ANALIZADOR HEURÍSTICO UNIVERSAL ---
 
+// --- ANALIZADOR HEURÍSTICO UNIVERSAL ---
 const analyzeFilePurpose = (fileName) => {
   const name = fileName.toLowerCase();
 
@@ -50,12 +50,12 @@ export default function App() {
 
   const [rootFiles, setRootFiles] = useState([]);
   const [activeTab, setActiveTab] = useState('mods');
-  const [versionSelectorModal, setVersionSelectorModal] = useState(null); 
+  const [versionSelectorModal, setVersionSelectorModal] = useState(null);
 
   // Estado para el modal de Nuevo Proyecto
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ name: '', mcVersion: '1.20.1', loader: 'Forge' });
-  const [availableGameVersions, setAvailableGameVersions] = useState([]); // <--- NUEVO ESTADO
+  const [availableGameVersions, setAvailableGameVersions] = useState([]);
 
   // --- ESTADOS DE LOS BUSCADORES ---
   const [searchTerm, setSearchTerm] = useState('');
@@ -69,8 +69,8 @@ export default function App() {
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
   const [downloadingMods, setDownloadingMods] = useState({});
 
-  const [sortBy, setSortBy] = useState('downloads'); // downloads, relevance, newest
-  const [modCategory, setModCategory] = useState(''); // technology, magic, optimization, etc.
+  const [sortBy, setSortBy] = useState('downloads');
+  const [modCategory, setModCategory] = useState('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
@@ -86,9 +86,8 @@ export default function App() {
 
   const [editingConfig, setEditingConfig] = useState(null);
 
-
   const onNodeContextMenu = useCallback((event, node) => {
-    event.preventDefault(); 
+    event.preventDefault();
     setContextMenu({ x: event.clientX, y: event.clientY, node });
   }, []);
 
@@ -106,7 +105,6 @@ export default function App() {
     setChatInput(query);
   };
 
-  // 1. EXTRAEMOS LA LÓGICA A UNA FUNCIÓN REUTILIZABLE
   const processScanResult = (result) => {
     if (!result) return;
 
@@ -114,7 +112,6 @@ export default function App() {
     setPackInfo(info);
     setRootFiles(filesFromRoot || []);
 
-    // ✨ LA MAGIA DE LA MEMORIA: Guardamos la ruta del modpack al cargar
     if (info && info.path) {
       localStorage.setItem('lastModpackPath', info.path);
     }
@@ -122,16 +119,15 @@ export default function App() {
     const newNodes = [];
     const newEdges = [];
 
-    // --- LÓGICA DE AGRUPAMIENTO AUTOMÁTICO (POR CANTIDAD DE CONFIGS) ---
     const groups = {
       'Librerías / Coremods': []
     };
 
     mods.forEach(mod => {
       const lowerName = mod.name.toLowerCase();
-      
+
       if (
-        lowerName.includes('core') || lowerName.includes('lib') || 
+        lowerName.includes('core') || lowerName.includes('lib') ||
         lowerName.includes('api') || lowerName.includes('patch') ||
         lowerName.includes('baubles') || lowerName.includes('bookshelf')
       ) {
@@ -139,7 +135,7 @@ export default function App() {
       } else {
         const configCount = mod.configs.length;
         let groupName = '';
-        
+
         if (configCount === 0) {
           groupName = 'Contenido (Sin Configs)';
         } else if (configCount === 1) {
@@ -195,30 +191,30 @@ export default function App() {
 
       modsInGroup.forEach((mod, index) => {
         const modId = `mod-${mod.id}`;
-        
+
         const relX = (index % cols) * 310 + 20;
-        const relY = Math.floor(index / cols) * rowHeight + 60; 
+        const relY = Math.floor(index / cols) * rowHeight + 60;
 
         newNodes.push({
           id: modId,
           type: 'mod',
           position: { x: relX, y: relY },
-          parentNode: groupId, 
-          extent: 'parent', 
+          parentNode: groupId,
+          extent: 'parent',
           data: {
             label: mod.name,
             version: mod.version,
             icon: mod.icon,
             hasConfigs: mod.configs.length > 0
           },
-          style: { zIndex: 1 } 
+          style: { zIndex: 1 }
         });
 
         mod.configs.forEach((cfg, cIndex) => {
           const cfgId = `cfg-${mod.id}-${cIndex}`;
           newNodes.push({
             id: cfgId,
-            parentNode: modId, 
+            parentNode: modId,
             extent: 'parent',
             style: {
               background: '#94e2d5', color: '#11111b', fontSize: '10px',
@@ -242,7 +238,6 @@ export default function App() {
     setEdges(newEdges);
   };
 
-  // 2. EL BOTÓN MANUAL (Ahora es súper corto porque delega el trabajo)
   const handleScanFolder = async () => {
     if (window.electronAPI) {
       const result = await window.electronAPI.scanMods();
@@ -252,15 +247,14 @@ export default function App() {
 
   const handleOpenProjectWizard = () => setIsCreatingProject(true);
 
-  // Ejecuta la creación real
   const handleConfirmCreateProject = async () => {
     if (!newProjectData.name.trim()) return alert("Dale un nombre a tu modpack.");
-    
+
     if (window.electronAPI) {
       const result = await window.electronAPI.createProject(newProjectData);
       if (result) {
         processScanResult(result);
-        setIsCreatingProject(false); // Cierra el modal
+        setIsCreatingProject(false);
         alert(`¡Entorno creado! Carpeta configurada para ${newProjectData.loader} ${newProjectData.mcVersion}`);
       } else {
         alert("Se canceló la selección de carpeta.");
@@ -268,7 +262,6 @@ export default function App() {
     }
   };
 
-  // ACTUALIZA LA BÚSQUEDA ONLINE PARA ENVIAR EL LOADER
   useEffect(() => {
     if (activeTab === 'store' && packInfo) {
       handleSearchOnline();
@@ -280,7 +273,6 @@ export default function App() {
       if (isCreatingProject && availableGameVersions.length === 0 && window.electronAPI) {
         const result = await window.electronAPI.getGameVersions();
         if (result && result.success) {
-          // Filtramos solo las versiones "release" (oficiales) para no llenar la lista de snapshots
           const releases = result.versions.filter(v => v.version_type === 'release');
           setAvailableGameVersions(releases);
         }
@@ -289,93 +281,84 @@ export default function App() {
     fetchVersions();
   }, [isCreatingProject]);
 
-  // 2. Buscador Actualizado (¡Sin el candado de texto vacío!)
   const handleSearchOnline = async () => {
-    if (!window.electronAPI || !packInfo) return; 
-    
+    if (!window.electronAPI || !packInfo) return;
+
     setIsSearchingOnline(true);
-    setCurrentPage(1); // <--- NUEVO: Volvemos a la página 1 en cada búsqueda nueva
+    setCurrentPage(1);
 
     const result = await window.electronAPI.searchModsOnline(
-      onlineSearchQuery, packInfo.loader, sortBy, modCategory
+      onlineSearchQuery, packInfo.gameVersion, packInfo.loader, sortBy, modCategory
     );
-    
+
     if (result && result.success) setOnlineResults(result.results);
     setIsSearchingOnline(false);
   };
 
-
-
-  // ACTUALIZA LA BÚSQUEDA DE VERSIONES PARA ENVIAR EL LOADER
-  const handleSelectModVersions = async (projectId, modTitle) => {
+  const handleSelectModVersions = async (projectId, modTitle, source) => {
     if (!window.electronAPI || !packInfo) return;
     setDownloadingMods(prev => ({ ...prev, [projectId]: true }));
 
-    const result = await window.electronAPI.getModVersions(projectId, packInfo.gameVersion, packInfo.loader);
-    
+    const result = await window.electronAPI.getModVersions(projectId, packInfo.gameVersion, packInfo.loader, source);
+
     if (result && result.success && result.versions.length > 0) {
-      setVersionSelectorModal({ title: modTitle, projectId: projectId, versions: result.versions });
+      setVersionSelectorModal({ title: modTitle, projectId: projectId, source: source, versions: result.versions });
     } else {
-      alert(`No hay versiones de ${modTitle} para ${packInfo.loader} ${packInfo.gameVersion}.`);
+      alert(`No hay versiones de ${modTitle} para ${packInfo.loader} ${packInfo.gameVersion} en la base de datos de ${source.toUpperCase()}.`);
     }
     setDownloadingMods(prev => ({ ...prev, [projectId]: false }));
   };
 
-  // Descarga la versión seleccionada
   const handleConfirmDownload = async (version) => {
     if (!window.electronAPI || !packInfo || !versionSelectorModal) return;
-    
+
     const modTitle = versionSelectorModal.title;
-    setVersionSelectorModal(null); 
+    setVersionSelectorModal(null);
 
     let downloadDeps = false;
     if (version.dependencies && version.dependencies.length > 0) {
-      downloadDeps = window.confirm(`⚠️ "${modTitle}" necesita dependencias obligatorias.\n\n¿Deseas que el Algoritmo Recursivo las busque, filtre por la versión ${packInfo.gameVersion} y las instale automáticamente?`);
+      if (version.source === 'modrinth') {
+        downloadDeps = window.confirm(`⚠️ "${modTitle}" necesita dependencias obligatorias.\n\n¿Deseas que el Algoritmo Recursivo las busque, filtre por la versión ${packInfo.gameVersion} y las instale automáticamente?`);
+      } else {
+        alert(`⚠️ "${modTitle}" requiere dependencias. Como viene de CurseForge, el instalador no las bajará automáticamente. Por favor, instálalas tú mismo desde la tienda.`);
+      }
     }
 
     try {
-      if (downloadDeps) {
-        // Usamos el nuevo instalador recursivo
+      if (downloadDeps && version.source === 'modrinth') {
         alert(`Iniciando descarga recursiva de ${modTitle} y su árbol de dependencias...`);
         const result = await window.electronAPI.installModRecursively(version.id, packInfo.gameVersion, packInfo.loader, packInfo.path);
         console.log("Log de instalación:", result.logs);
       } else {
-        // Solo instalamos el principal
-        await window.electronAPI.downloadMod(version.id, packInfo.path);
+        await window.electronAPI.downloadMod(version, packInfo.path);
       }
 
-      // Refrescamos el ecosistema visual
       const scanResult = await window.electronAPI.scanMods(packInfo.path);
       if (scanResult) processScanResult(scanResult);
-      
-      alert(`✅ ¡Instalación de ${modTitle} completada! Revisa tu lienzo de mods.`);
+
+      alert(`✅ ¡Instalación de ${modTitle} completada! Revisa tu ecosistema de mods.`);
     } catch (err) {
       alert(`❌ Error al instalar: ${err.message}`);
     }
   };
 
-  // 3. AUTO-CARGADOR AL INICIAR LA APP
   useEffect(() => {
     const autoLoadLastPack = async () => {
       const lastPath = localStorage.getItem('lastModpackPath');
-      // Si existe una ruta guardada de la sesión anterior, la cargamos silenciosamente
       if (lastPath && window.electronAPI) {
         try {
           const result = await window.electronAPI.scanMods(lastPath);
           if (result) processScanResult(result);
         } catch (e) {
           console.warn("No se pudo auto-cargar la carpeta anterior.", e);
-          localStorage.removeItem('lastModpackPath'); // Limpiamos la memoria si la carpeta ya no existe
+          localStorage.removeItem('lastModpackPath');
         }
       }
     };
-    
+
     autoLoadLastPack();
   }, []);
 
-  // ==========================================
-  // EL MOTOR DEL AGENTE AUTÓNOMO (LOOP OPTIMIZADO)
-  // ==========================================
   const handleSendMessage = async () => {
     if (!chatInput.trim()) return;
 
@@ -385,11 +368,10 @@ export default function App() {
     const newHistory = [...messages, { role: 'user', text: userText }];
     setMessages([...newHistory, { role: 'bot', text: 'Procesando consulta...' }]);
 
-    // Contexto restringido para evitar context bloat en OpenRouter
     const contextData = {
       packName: packInfo?.name || 'Desconocido',
       mcVersion: packInfo?.gameVersion || 'Desconocida',
-      packPath: packInfo?.path 
+      packPath: packInfo?.path
     };
 
     let currentHistoryForAI = newHistory.map(msg => ({
@@ -404,18 +386,17 @@ export default function App() {
       while (isAgentWorking) {
         if (!window.electronAPI) throw new Error("API de Electron inactiva");
 
-        // Filtro de historial a corto plazo
-        let payloadHistory = currentHistoryForAI.length > 4 
+        let payloadHistory = currentHistoryForAI.length > 4
           ? [currentHistoryForAI[0], ...currentHistoryForAI.slice(-3)]
           : currentHistoryForAI;
 
         const botResponse = await window.electronAPI.askBot(contextData, payloadHistory);
 
         if (botResponse.startsWith('[ACCION:')) {
-          const cleanAction = botResponse.replace(/^\[|\]$/g, ''); 
+          const cleanAction = botResponse.replace(/^\[|\]$/g, '');
           const parts = cleanAction.split('|').map(p => p.trim());
-          const actionType = parts[0]; 
-          
+          const actionType = parts[0];
+
           let toolResult = "";
 
           if (actionType === 'ACCION: LEER_ARCHIVO') setMessages([...newHistory, { role: 'bot', text: `Extrayendo datos de ${parts[1]}...` }]);
@@ -448,9 +429,9 @@ export default function App() {
               toolResult = "SISTEMA: Acción desconocida/inválida.";
           }
 
-          currentHistoryForAI.push({ role: 'assistant', content: botResponse }); 
+          currentHistoryForAI.push({ role: 'assistant', content: botResponse });
           currentHistoryForAI.push({ role: 'user', content: `[RESULTADO I/O]:\n${toolResult}\nDIRECTIVA: Evaluar resultado. Si el objetivo se cumple, reportar al usuario. Si se requiere más información, ejecutar siguiente herramienta.` });
-          
+
         } else {
           isAgentWorking = false;
           finalBotMessage = botResponse;
@@ -475,7 +456,6 @@ export default function App() {
     });
   }, [rootFiles, searchTerm]);
 
-  // --- LÓGICA DE OPACIDAD PARA EL ECOSISTEMA DE MODS ---
   const displayNodes = useMemo(() => {
     return nodes.map(node => {
       if (!searchMods) return { ...node, style: { ...node?.style, opacity: 1, pointerEvents: 'all' } };
@@ -508,19 +488,16 @@ export default function App() {
         const targetNode = exactMatch || matches[0];
         rfInstance.setCenter(targetNode.position.x + 75, targetNode.position.y + 25, {
           zoom: 1.2,
-          duration: 800 
+          duration: 800
         });
       }
     }
   };
 
   const onNodeClick = async (event, node) => {
-    // Si el nodo es una configuración (su id empieza con cfg-)
     if (node.id.startsWith('cfg-') && window.electronAPI && packInfo) {
-      // Limpiamos el título para sacar el nombre del archivo (quitamos el emoji)
       const fileName = node.data.label.replace('⚙️ ', '').trim();
-      // Como sabemos que en React Flow estos configs vienen de la carpeta config:
-      const relativePath = `config/${fileName}`; 
+      const relativePath = `config/${fileName}`;
 
       const result = await window.electronAPI.readFullFile(relativePath, packInfo.path);
       if (result.success) {
@@ -531,12 +508,24 @@ export default function App() {
     }
   };
 
-  // FUNCIÓN PARA GUARDAR DESDE EL MODAL
+  const handleOpenGlobalFile = async (fileName) => {
+    if (!window.electronAPI || !packInfo) return;
+    
+    const result = await window.electronAPI.readFullFile(fileName, packInfo.path);
+    
+    if (result.success) {
+      setEditingConfig({ name: fileName, path: fileName, content: result.content });
+    } else {
+      // ✨ Ahora nos mostrará la verdad
+      alert(result.message);
+    }
+  };
+
   const handleSaveConfig = async (newContent) => {
     if (window.electronAPI && packInfo && editingConfig) {
       const result = await window.electronAPI.writeFile(editingConfig.path, packInfo.path, newContent);
       if (result.success) {
-        setEditingConfig(null); // Cerramos el modal
+        setEditingConfig(null);
         alert("¡Configuración guardada con éxito!");
       } else {
         alert("Error al guardar el archivo.");
@@ -544,14 +533,19 @@ export default function App() {
     }
   };
 
-  // Función para exportar el modpack a un ZIP
+  const handleOpenExternal = async () => {
+    if (window.electronAPI && packInfo && editingConfig) {
+      await window.electronAPI.openExternalEditor(editingConfig.path, packInfo.path);
+    }
+  };
+
   const handleExportModpack = async () => {
     if (!window.electronAPI || !packInfo) return;
-    
+
     alert("📦 Empaquetando modpack...\n\nEsto puede tardar unos segundos dependiendo de cuántos mods tengas. Presiona Aceptar y espera.");
-    
+
     const result = await window.electronAPI.exportModpack(packInfo.path, packInfo.name);
-    
+
     if (result && result.success) {
       alert(`✅ ¡Modpack exportado con éxito!\n\nSe ha guardado en:\n${result.path}\n\nSe abrirá la carpeta automáticamente. Arrastra este archivo .zip a Prism Launcher o CurseForge para jugarlo.`);
     } else {
@@ -562,52 +556,97 @@ export default function App() {
   const handleDiagnosePack = async () => {
     if (!window.electronAPI || !packInfo) return;
     setIsDiagnosing(true);
-    
+
     const result = await window.electronAPI.diagnoseModpack(packInfo.path);
     setIsDiagnosing(false);
-    
+
     if (result && result.success) {
       setDiagnosticReport(result.report);
-      
-      // Recorremos todos los nodos y vemos si su nombre de archivo coincide con un error
+
       setNodes(nds => nds.map(node => {
         if (node.type === 'mod') {
-          // Buscamos si el nombre del mod coincide con algún archivo que dio error
-          const hasError = Object.entries(result.report.fileStatusMap).some(([fileName, status]) => 
+          const hasError = Object.entries(result.report.fileStatusMap).some(([fileName, status]) =>
             status === 'error' && fileName.includes(node.data.label.toLowerCase().replace(/\s/g, ''))
           );
 
           if (hasError) {
             return {
               ...node,
-              style: { ...node.style, border: '3px solid #f38ba8', boxShadow: '0 0 20px rgba(243, 139, 168, 0.8)' } // Rojo brillante
+              style: { ...node.style, border: '3px solid #f38ba8', boxShadow: '0 0 20px rgba(243, 139, 168, 0.8)' }
             };
           } else {
             return {
               ...node,
-              style: { ...node.style, border: '2px solid #a6e3a1', boxShadow: '0 0 10px rgba(166, 227, 161, 0.3)' } // Verde salud
+              style: { ...node.style, border: '2px solid #a6e3a1', boxShadow: '0 0 10px rgba(166, 227, 161, 0.3)' }
             };
           }
         }
         return node;
       }));
-      
+
     } else {
       alert(`Error en el diagnóstico: ${result?.message}`);
     }
   };
 
+  // ✨ AQUÍ ESTÁ LA FUNCIÓN REPARADA ✨
+  const handleNodesDelete = async (deletedNodes) => {
+    for (const node of deletedNodes) {
+      console.log("🔍 Intentando borrar el nodo:", node);
+
+      let fileName = node.data?.id || node.data?.name || node.id;
+
+      if (fileName.startsWith('mod-')) {
+        fileName = fileName.replace('mod-', '');
+      }
+
+      // LA CLÁUSULA DE GUARDIA CORRECTA
+      if (!fileName.endsWith('.jar')) {
+        console.error(`❌ El nombre extraído no parece un archivo: ${fileName}`);
+        alert(`Error interno: React intentó borrar algo que no es un .jar (${fileName})`);
+        continue;
+      }
+
+      try {
+        const result = await window.electronAPI.deleteFile(`mods/${fileName}`, packInfo.path);
+
+        if (result.success) {
+          console.log(`✅ ¡Fuego en el hoyo! Archivo eliminado del disco: ${fileName}`);
+        } else {
+          console.error(`❌ Fallo en el backend: ${result.message}`);
+          alert(`El nodo desapareció, pero Node.js no pudo borrar el archivo: ${fileName}\nMotivo: ${result.message}`);
+        }
+      } catch (error) {
+        console.error("Error grave de comunicación:", error);
+      }
+    }
+  };
+
+  const cargarConfiguracion = async (rutaDelServerConfig) => {
+    const respuesta = await window.electronAPI.readToml(rutaDelServerConfig);
+
+    if (respuesta.success) {
+      // ¡Magia! Ahora es un objeto de JavaScript fácil de leer
+      console.log("Configuración cargada:", respuesta.data);
+
+      // Si el TOML decía: damage = 50
+      // Puedes acceder a él usando: respuesta.data.damage
+    } else {
+      console.error("No se pudo leer el archivo:", respuesta.error);
+    }
+  };
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'sans-serif', overflow: 'hidden' }}>
-      
+
       {/* --- MODAL: EDITOR DE CONFIGURACIONES --- */}
       {editingConfig && (
-        <ConfigEditor 
+        <ConfigEditor
           fileName={editingConfig.name}
           initialContent={editingConfig.content}
           onClose={() => setEditingConfig(null)}
           onSave={handleSaveConfig}
+          onOpenExternal={handleOpenExternal}
         />
       )}
 
@@ -617,21 +656,19 @@ export default function App() {
           <div style={{ background: '#1e1e2e', border: '2px solid #a6e3a1', borderRadius: '12px', width: '450px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.8)' }}>
             <h2 style={{ color: '#a6e3a1', marginTop: 0 }}>✨ Crear Entorno Virtual</h2>
             <p style={{ color: '#a6adc8', fontSize: '14px', marginBottom: '25px' }}>Configura los parámetros base de tu nuevo Modpack.</p>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
               <div>
                 <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Nombre del Proyecto</label>
-                <input type="text" value={newProjectData.name} onChange={e => setNewProjectData({...newProjectData, name: e.target.value})} placeholder="Ej: Mi Aventura RPG" style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none' }} />
+                <input type="text" value={newProjectData.name} onChange={e => setNewProjectData({ ...newProjectData, name: e.target.value })} placeholder="Ej: Mi Aventura RPG" style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none' }} />
               </div>
-              
+
               <div style={{ display: 'flex', gap: '15px' }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Versión de Minecraft</label>
-                  
-                  {/* EL NUEVO SELECTOR INTELIGENTE */}
-                  <select 
-                    value={newProjectData.mcVersion} 
-                    onChange={e => setNewProjectData({...newProjectData, mcVersion: e.target.value})} 
+                  <select
+                    value={newProjectData.mcVersion}
+                    onChange={e => setNewProjectData({ ...newProjectData, mcVersion: e.target.value })}
                     style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', cursor: 'pointer' }}
                   >
                     {availableGameVersions.length > 0 ? (
@@ -644,12 +681,11 @@ export default function App() {
                       <option value="1.20.1">Cargando versiones...</option>
                     )}
                   </select>
-
                 </div>
-                
+
                 <div style={{ flex: 1 }}>
                   <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Mod Loader</label>
-                  <select value={newProjectData.loader} onChange={e => setNewProjectData({...newProjectData, loader: e.target.value})} style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', cursor: 'pointer' }}>
+                  <select value={newProjectData.loader} onChange={e => setNewProjectData({ ...newProjectData, loader: e.target.value })} style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', cursor: 'pointer' }}>
                     <option value="Forge">Forge</option>
                     <option value="Fabric">Fabric</option>
                     <option value="NeoForge">NeoForge</option>
@@ -683,12 +719,12 @@ export default function App() {
               <h3 style={{ margin: 0, color: '#cba6f7' }}>📥 Instalar: {versionSelectorModal.title}</h3>
               <button onClick={() => setVersionSelectorModal(null)} style={{ background: 'transparent', border: 'none', color: '#f38ba8', fontSize: '20px', cursor: 'pointer' }}>✖</button>
             </div>
-            
+
             <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <p style={{ margin: '0 0 10px 0', color: '#a6adc8', fontSize: '14px' }}>
                 Selecciona la versión para Minecraft <b>{packInfo?.gameVersion}</b>:
               </p>
-              
+
               {versionSelectorModal.versions.map(v => (
                 <div key={v.id} style={{ background: '#11111b', border: '1px solid #313244', padding: '15px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -700,7 +736,7 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleConfirmDownload(v)}
                     style={{ background: '#89b4fa', color: '#11111b', border: 'none', padding: '8px 15px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>
                     Descargar
@@ -716,8 +752,7 @@ export default function App() {
       {diagnosticReport && (
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3000, background: 'rgba(17, 17, 27, 0.9)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <div style={{ background: '#1e1e2e', border: `2px solid ${diagnosticReport.errors.length > 0 ? '#f38ba8' : '#a6e3a1'}`, borderRadius: '12px', width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
-            
-            {/* Cabecera */}
+
             <div style={{ padding: '20px', borderBottom: '1px solid #313244', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#181825' }}>
               <h2 style={{ margin: 0, color: diagnosticReport.errors.length > 0 ? '#f38ba8' : '#a6e3a1', display: 'flex', alignItems: 'center', gap: '10px' }}>
                 {diagnosticReport.errors.length > 0 ? '❌ Conflictos Detectados' : '✅ Pack Saludable'}
@@ -725,10 +760,7 @@ export default function App() {
               <button onClick={() => setDiagnosticReport(null)} style={{ background: 'transparent', border: 'none', color: '#a6adc8', fontSize: '20px', cursor: 'pointer' }}>✖</button>
             </div>
 
-            {/* Contenido scrolleable */}
             <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              
-              {/* Resumen */}
               <div style={{ display: 'flex', gap: '15px', justifyContent: 'space-between' }}>
                 <div style={{ background: '#11111b', padding: '15px', borderRadius: '8px', flex: 1, textAlign: 'center', border: '1px solid #313244' }}>
                   <div style={{ color: '#cdd6f4', fontSize: '24px', fontWeight: 'bold' }}>{diagnosticReport.total}</div>
@@ -744,7 +776,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Lista de Errores Críticos */}
               {diagnosticReport.errors.length > 0 && (
                 <div>
                   <h3 style={{ color: '#f38ba8', margin: '0 0 10px 0', fontSize: '16px' }}>Errores que causarán crasheos:</h3>
@@ -758,7 +789,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Lista de Advertencias */}
               {diagnosticReport.warnings.length > 0 && (
                 <div>
                   <h3 style={{ color: '#f9e2af', margin: '0 0 10px 0', fontSize: '16px' }}>Advertencias (Desconocidos):</h3>
@@ -829,7 +859,6 @@ export default function App() {
             ✨ Nuevo Proyecto
           </button>
 
-          {/* NUEVOS BOTONES: EXPORTAR Y SANDBOX (Aparecen solo cuando hay un modpack) */}
           {packInfo && (
             <>
               <button onClick={handleExportModpack} style={{
@@ -840,7 +869,6 @@ export default function App() {
                 📦 Exportar para Jugar
               </button>
 
-              {/* BOTÓN DE DIAGNÓSTICO ESTÁTICO */}
               <button onClick={handleDiagnosePack} disabled={isDiagnosing} style={{
                 background: isDiagnosing ? '#f9e2af' : '#89dceb', color: '#11111b', border: 'none',
                 padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: isDiagnosing ? 'wait' : 'pointer',
@@ -851,7 +879,6 @@ export default function App() {
             </>
           )}
 
-          {/* INFORMACIÓN DEL MODPACK Y PESTAÑAS */}
           {packInfo && (
             <>
               <div style={{ display: 'flex', gap: '15px', borderLeft: '2px solid #45475a', paddingLeft: '20px' }}>
@@ -882,7 +909,6 @@ export default function App() {
           )}
         </div>
 
-        {/* --- BOTÓN DEL ASISTENTE Y TÍTULO --- */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button
             onClick={() => setIsBotOpen(!isBotOpen)}
@@ -899,14 +925,13 @@ export default function App() {
         </div>
       </div>
 
-      {/* --- PANEL LATERAL DEL CHAT (DRAWER) --- */}
+      {/* --- PANEL LATERAL DEL CHAT --- */}
       <div style={{
         position: 'absolute', top: '70px', right: isBotOpen ? '0' : '-400px',
         width: '400px', height: 'calc(100vh - 70px)', background: '#181825',
         borderLeft: '2px solid #313244', transition: 'right 0.3s ease-in-out',
         zIndex: 20, display: 'flex', flexDirection: 'column', boxShadow: '-5px 0 20px rgba(0,0,0,0.5)'
       }}>
-        {/* Cabecera del Chat */}
         <div style={{ padding: '20px', borderBottom: '1px solid #313244', background: '#11111b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h3 style={{ margin: 0, color: '#a6e3a1', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -916,7 +941,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Historial de Mensajes */}
         <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
           {messages.map((msg, i) => (
             <div key={i} style={{
@@ -928,12 +952,10 @@ export default function App() {
               borderBottomLeftRadius: msg.role === 'bot' ? '4px' : '12px',
               fontSize: '14px', lineHeight: '1.4', wordBreak: 'break-word'
             }}>
-              
-              {/* RENDERIZADO MARKDOWN */}
               {msg.role === 'bot' ? (
                 <ReactMarkdown
                   components={{
-                    code({node, inline, className, children, ...props}) {
+                    code({ node, inline, className, children, ...props }) {
                       const match = /language-(\w+)/.exec(className || '');
                       return !inline && match ? (
                         <SyntaxHighlighter
@@ -957,12 +979,10 @@ export default function App() {
               ) : (
                 msg.text
               )}
-
             </div>
           ))}
         </div>
 
-        {/* Input de Texto */}
         <div style={{ padding: '20px', borderTop: '1px solid #313244', display: 'flex', gap: '10px', background: '#181825' }}>
           <input
             type="text"
@@ -993,9 +1013,8 @@ export default function App() {
 
       {/* --- CONTENIDO PRINCIPAL --- */}
       <div id="main-scroll-area" style={{ width: '100%', height: '100%', paddingTop: '70px', overflowY: 'auto', boxSizing: 'border-box' }}>
-        
+
         {activeTab === 'mods' && (
-          /* VISTA A: MAPA DE NODOS CON BUSCADOR FLOTANTE */
           <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 70px)' }}>
             {nodes.length > 0 && (
               <div style={{
@@ -1020,7 +1039,8 @@ export default function App() {
 
             <ReactFlow nodes={displayNodes} edges={edges} onNodesChange={onNodesChange} onInit={setRfInstance} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView
               onNodeContextMenu={onNodeContextMenu}
-              onPaneClick={onPaneClick} onNodeClick={onNodeClick}>
+              onPaneClick={onPaneClick} onNodeClick={onNodeClick}
+              onNodesDelete={handleNodesDelete}>
               <Background color="#313244" variant="dots" gap={25} size={1} />
               <Controls />
               <MiniMap nodeColor="#cba6f7" maskColor="rgba(30, 30, 46, 0.7)" style={{ background: '#11111b' }} />
@@ -1029,7 +1049,6 @@ export default function App() {
         )}
 
         {activeTab === 'global' && (
-          /* VISTA B: CONFIGURACIÓN GENERAL (DINÁMICA) */
           <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
             <h2>Configuraciones Globales</h2>
             <p style={{ color: '#a6adc8', marginBottom: '20px' }}>Estructura del directorio detectado en {packInfo?.name}</p>
@@ -1054,14 +1073,37 @@ export default function App() {
                 {rootFiles.length > 0 ? (
                   filteredFiles.length > 0 ? (
                     filteredFiles.map((file, i) => (
-                      <li key={i} style={{ marginBottom: '12px', padding: '12px', background: '#11111b', borderRadius: '8px', border: '1px solid #313244' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <b style={{ color: '#cba6f7' }}>{file.includes('.') ? '📄' : '📁'} {file}</b>
-                          <span style={{ color: '#94e2d5', fontSize: '11px' }}>OK</span>
+                      <li key={i} style={{
+                        marginBottom: '12px', padding: '12px', background: '#11111b',
+                        borderRadius: '8px', border: '1px solid #313244',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                      }}>
+
+                        {/* Textos a la izquierda */}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <b style={{ color: '#cba6f7' }}>{file.includes('.') ? '📄' : '📁'} {file}</b>
+                          </div>
+                          <p style={{ margin: 0, color: '#a6adc8', fontSize: '13px', fontStyle: 'italic' }}>
+                            {analyzeFilePurpose(file, language)} {/* Asumiendo que implementaste el diccionario i18n */}
+                          </p>
                         </div>
-                        <p style={{ margin: 0, color: '#a6adc8', fontSize: '13px', fontStyle: 'italic' }}>
-                          {analyzeFilePurpose(file)}
-                        </p>
+
+                        {/* Botón de apertura a la derecha */}
+                        <button
+                          onClick={() => handleOpenGlobalFile(file)}
+                          style={{
+                            background: '#89b4fa', color: '#11111b', border: 'none',
+                            padding: '8px 15px', borderRadius: '6px', fontWeight: 'bold',
+                            cursor: 'pointer', transition: 'transform 0.1s', flexShrink: 0
+                          }}
+                          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
+                          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                          ✏️ Abrir
+                        </button>
+
                       </li>
                     ))
                   ) : (
@@ -1086,12 +1128,11 @@ export default function App() {
                 <h2 style={{ color: '#cba6f7', margin: 0 }}>Vitrina de Mods</h2>
                 <p style={{ color: '#a6adc8', margin: '5px 0 0 0' }}>Descubre e instala mods para <b>{packInfo?.loader} {packInfo?.gameVersion}</b>.</p>
               </div>
-              
-              {/* SELECTOR DE ORDEN */}
+
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ color: '#a6adc8', fontSize: '14px' }}>Ordenar por:</span>
-                <select 
-                  value={sortBy} 
+                <select
+                  value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
                   style={{ background: '#181825', color: '#cdd6f4', border: '1px solid #313244', padding: '8px', borderRadius: '6px', outline: 'none' }}
                 >
@@ -1103,25 +1144,23 @@ export default function App() {
               </div>
             </div>
 
-            {/* BARRA DE BÚSQUEDA Y CATEGORÍAS */}
             <div style={{ background: '#181825', padding: '15px', borderRadius: '12px', border: '1px solid #313244', marginBottom: '30px' }}>
               <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                <input 
-                  type="text" 
-                  placeholder="🔍 Buscar por nombre (ej: Create, JEI)..." 
+                <input
+                  type="text"
+                  placeholder="🔍 Buscar por nombre (ej: Create, JEI)..."
                   value={onlineSearchQuery}
                   onChange={(e) => setOnlineSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearchOnline()}
                   style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', fontSize: '15px' }}
                 />
-                <button 
+                <button
                   onClick={handleSearchOnline} disabled={isSearchingOnline}
                   style={{ background: '#cba6f7', color: '#11111b', border: 'none', padding: '0 25px', borderRadius: '8px', fontWeight: 'bold', cursor: isSearchingOnline ? 'wait' : 'pointer' }}>
                   {isSearchingOnline ? '⏳...' : 'Buscar'}
                 </button>
               </div>
 
-              {/* PÍLDORAS DE CATEGORÍA */}
               <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '5px' }}>
                 {[
                   { id: '', label: '🌐 Todos' },
@@ -1149,59 +1188,51 @@ export default function App() {
               </div>
             </div>
 
-            {/* Resultados Paginados */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
               {onlineResults
                 .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
                 .map((mod) => (
-                <div key={mod.project_id} style={{ background: '#181825', border: '1px solid #313244', borderRadius: '12px', padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' }}>
-                  
-                  {/* Icono del mod */}
-                  <div style={{ width: '80px', height: '80px', background: '#11111b', borderRadius: '10px', overflow: 'hidden', flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    {mod.icon_url ? <img src={mod.icon_url} alt={mod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{fontSize:'30px'}}>🧩</span>}
-                  </div>
-                  
-                  {/* Info */}
-                  <div style={{ flex: 1 }}>
-                    
-                    {/* TÍTULO Y ETIQUETA DE PLATAFORMA */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
-                      <h3 style={{ margin: 0, color: '#cdd6f4', fontSize: '20px' }}>{mod.title}</h3>
-                      <span style={{ 
-                        fontSize: '10px', 
-                        padding: '2px 6px', 
-                        borderRadius: '4px', 
-                        background: mod.source === 'modrinth' ? '#a6e3a1' : '#f9e2af',
-                        color: '#11111b',
-                        fontWeight: 'bold'
-                      }}>
-                        {mod.source ? mod.source.toUpperCase() : 'MODRINTH'}
-                      </span>
+                  <div key={mod.project_id} style={{ background: '#181825', border: '1px solid #313244', borderRadius: '12px', padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' }}>
+                    <div style={{ width: '80px', height: '80px', background: '#11111b', borderRadius: '10px', overflow: 'hidden', flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                      {mod.icon_url ? <img src={mod.icon_url} alt={mod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '30px' }}>🧩</span>}
                     </div>
 
-                    <p style={{ margin: '0 0 10px 0', color: '#a6adc8', fontSize: '14px', lineHeight: '1.4' }}>{mod.description}</p>
-                    
-                    <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#6c7086' }}>
-                      <span>👤 {mod.author}</span>
-                      <span>⬇️ {mod.downloads.toLocaleString()} descargas</span>
-                    </div>
-                  </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
+                        <h3 style={{ margin: 0, color: '#cdd6f4', fontSize: '20px' }}>{mod.title}</h3>
+                        <span style={{
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: mod.source === 'modrinth' ? '#a6e3a1' : '#f9e2af',
+                          color: '#11111b',
+                          fontWeight: 'bold'
+                        }}>
+                          {mod.source ? mod.source.toUpperCase() : 'MODRINTH'}
+                        </span>
+                      </div>
 
-                  {/* Botón Instalar */}
-                  <button 
-                    onClick={() => handleSelectModVersions(mod.project_id, mod.title)}
-                    disabled={downloadingMods[mod.project_id]}
-                    style={{ background: downloadingMods[mod.project_id] ? '#f9e2af' : '#a6e3a1', color: '#11111b', border: 'none', padding: '12px 25px', borderRadius: '8px', fontWeight: 'bold', cursor: downloadingMods[mod.project_id] ? 'wait' : 'pointer', transition: 'all 0.2s', minWidth: '140px' }}>
-                    {downloadingMods[mod.project_id] ? '⏳ Descargando...' : '📥 Instalar'}
-                  </button>
-                </div>
-              ))}
+                      <p style={{ margin: '0 0 10px 0', color: '#a6adc8', fontSize: '14px', lineHeight: '1.4' }}>{mod.description}</p>
+
+                      <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#6c7086' }}>
+                        <span>👤 {mod.author}</span>
+                        <span>⬇️ {mod.downloads.toLocaleString()} descargas</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleSelectModVersions(mod.project_id, mod.title, mod.source)}
+                      disabled={downloadingMods[mod.project_id]}
+                      style={{ background: downloadingMods[mod.project_id] ? '#f9e2af' : '#a6e3a1', color: '#11111b', border: 'none', padding: '12px 25px', borderRadius: '8px', fontWeight: 'bold', cursor: downloadingMods[mod.project_id] ? 'wait' : 'pointer', transition: 'all 0.2s', minWidth: '140px' }}>
+                      {downloadingMods[mod.project_id] ? '⏳ Descargando...' : '📥 Instalar'}
+                    </button>
+                  </div>
+                ))}
             </div>
 
-            {/* CONTROLES DE PAGINACIÓN VISUALES */}
             {onlineResults.length > 0 && (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginTop: '30px', paddingTop: '20px', borderTop: '1px solid #313244' }}>
-                <button 
+                <button
                   onClick={() => {
                     setCurrentPage(p => Math.max(1, p - 1));
                     document.getElementById('main-scroll-area').scrollTo({ top: 0, behavior: 'smooth' });
@@ -1211,12 +1242,12 @@ export default function App() {
                 >
                   ⬅️ Anterior
                 </button>
-                
+
                 <span style={{ color: '#a6adc8', fontWeight: 'bold', fontSize: '14px' }}>
                   Página {currentPage} de {Math.ceil(onlineResults.length / itemsPerPage)}
                 </span>
-                
-                <button 
+
+                <button
                   onClick={() => {
                     setCurrentPage(p => Math.min(Math.ceil(onlineResults.length / itemsPerPage), p + 1));
                     document.getElementById('main-scroll-area').scrollTo({ top: 0, behavior: 'smooth' });

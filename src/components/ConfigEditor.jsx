@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 
-export default function ConfigEditor({ fileName, initialContent, onClose, onSave }) {
+
+export default function ConfigEditor({ fileName, initialContent, onClose, onSave, onOpenExternal }) {
   const [lines, setLines] = useState([]);
 
   useEffect(() => {
@@ -9,11 +10,11 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
       if (line.trim().startsWith('#') || !line.includes('=')) {
         return { id: index, type: 'text', original: line };
       }
-      
+
       const [key, ...rest] = line.split('=');
       const val = rest.join('=');
       const isBool = val.trim() === 'true' || val.trim() === 'false';
-      
+
       return {
         id: index, type: 'setting', key: key, value: val.trim(), isBool, original: line
       };
@@ -27,7 +28,7 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
 
   const handleSave = () => {
     // RECONSTRUCTOR: Vuelve a unir todo preservando los comentarios originales
-    const newContent = lines.map(l => 
+    const newContent = lines.map(l =>
       l.type === 'text' ? l.original : `${l.key}=${l.value}`
     ).join('\n');
     onSave(newContent);
@@ -64,9 +65,9 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
                 background: '#11111b', padding: '10px 15px', borderRadius: '8px', border: '1px solid #313244'
               }}>
                 <span style={{ color: '#cdd6f4', fontSize: '14px', fontFamily: 'monospace' }}>{line.key}</span>
-                
+
                 {line.isBool ? (
-                  <button 
+                  <button
                     onClick={() => handleChange(line.id, line.value === 'true' ? 'false' : 'true')}
                     style={{
                       background: line.value === 'true' ? '#a6e3a1' : '#f38ba8',
@@ -76,9 +77,9 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
                     {line.value.toUpperCase()}
                   </button>
                 ) : (
-                  <input 
-                    type="text" 
-                    value={line.value} 
+                  <input
+                    type="text"
+                    value={line.value}
                     onChange={(e) => handleChange(line.id, e.target.value)}
                     style={{
                       background: '#181825', border: '1px solid #45475a', color: '#89b4fa',
@@ -93,8 +94,23 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
 
         {/* Footer (Guardar) */}
         <div style={{ padding: '15px 20px', borderTop: '1px solid #313244', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+
+          {/* --- NUEVO BOTÓN PARA VS CODE --- */}
+          <button
+            onClick={onOpenExternal}
+            style={{
+              background: '#89b4fa', color: '#11111b', border: 'none',
+              padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            💻 Abrir en Editor Externo
+          </button>
+
           <button onClick={onClose} style={{ background: '#313244', color: '#cdd6f4', border: 'none', padding: '10px 20px', borderRadius: '6px', cursor: 'pointer' }}>Cancelar</button>
+
           <button onClick={handleSave} style={{ background: '#a6e3a1', color: '#11111b', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>💾 Guardar Cambios</button>
+
         </div>
       </div>
     </div>

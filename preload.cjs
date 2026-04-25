@@ -1,34 +1,37 @@
-// preload.cjs
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Exponemos una API segura al mundo de React
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Escáner y Chat (¡AQUÍ ESTÁ EL CAMBIO PRINCIPAL!)
-  scanMods: (path) => ipcRenderer.invoke('dialog:openFolder', path),
-  askBot: (contextData, userMessage) => ipcRenderer.invoke('ask-bot', contextData, userMessage),
-  
-  // Herramientas de Búsqueda y Lectura
-  openFile: (fileName, packPath) => ipcRenderer.invoke('open-file', fileName, packPath),
-  searchConfigs: (searchTerm, packPath) => ipcRenderer.invoke('search-configs', searchTerm, packPath),
-  readFile: (fileName, packPath) => ipcRenderer.invoke('read-file', fileName, packPath),
-  readLines: (fileName, packPath, startLine, endLine) => ipcRenderer.invoke('read-lines', fileName, packPath, startLine, endLine),
-  
-  // Herramientas de Edición
-  editFile: (fileName, packPath, oldText, newText) => ipcRenderer.invoke('edit-file', fileName, packPath, oldText, newText),
-  prependFile: (fileName, packPath, newText) => ipcRenderer.invoke('prepend-file', fileName, packPath, newText),
-  appendFile: (fileName, packPath, newText) => ipcRenderer.invoke('append-file', fileName, packPath, newText),
-  
-  // Herramientas de Sistema
-  writeFile: (fileName, packPath, content) => ipcRenderer.invoke('write-file', fileName, packPath, content),
-  deleteFile: (fileName, packPath) => ipcRenderer.invoke('delete-file', fileName, packPath),
-  renameFile: (oldName, newName, packPath) => ipcRenderer.invoke('rename-file', oldName, newName, packPath),
-  readFullFile: (fileName, packPath) => ipcRenderer.invoke('read-full-file', fileName, packPath),
+  // 1. Escaneo y Creación
+  scanMods: (knownPath) => ipcRenderer.invoke('dialog:openFolder', knownPath),
   createProject: (projectData) => ipcRenderer.invoke('create-project', projectData),
-  searchModsOnline: (query, loader, sortBy, category) => ipcRenderer.invoke('search-mods-online', query, loader, sortBy, category),
-  getModVersions: (projectId, gameVersion, loader) => ipcRenderer.invoke('get-mod-versions', projectId, gameVersion, loader),
-  downloadMod: (versionId, packPath) => ipcRenderer.invoke('download-mod', versionId, packPath),
+  
+  // 2. Buscador y Tienda (¡Aquí está el que te daba error!)
+  getGameVersions: () => ipcRenderer.invoke('get-game-versions'),
+  searchModsOnline: (query, gameVersion, loader, sortBy, category) => ipcRenderer.invoke('search-mods-online', query, gameVersion, loader, sortBy, category),
+  getModVersions: (projectId, gameVersion, loader, source) => ipcRenderer.invoke('get-mod-versions', projectId, gameVersion, loader, source),
+  
+  // 3. Descargas
+  downloadMod: (versionObj, packPath) => ipcRenderer.invoke('download-mod', versionObj, packPath),
+  installModRecursively: (versionId, gameVersion, loader, packPath) => ipcRenderer.invoke('install-mod-recursively', versionId, gameVersion, loader, packPath),
+  
+  // 4. Utilidades del Modpack
   diagnoseModpack: (packPath) => ipcRenderer.invoke('diagnose-modpack', packPath),
   exportModpack: (packPath, packName) => ipcRenderer.invoke('export-modpack', packPath, packName),
-  installModRecursively: (versionId, packVersion, packLoader, packPath) => ipcRenderer.invoke('install-mod-recursively', versionId, packVersion, packLoader, packPath),
-  getGameVersions: () => ipcRenderer.invoke('get-game-versions'),
+  
+  // 5. Manejo de Archivos Físicos (Eliminar, Leer, Editar)
+  deleteFile: (filePath, packPath) => ipcRenderer.invoke('delete-file', filePath, packPath),
+  readFile: (filePath, packPath) => ipcRenderer.invoke('read-file', filePath, packPath),
+  readFullFile: (filePath, packPath) => ipcRenderer.invoke('read-full-file', filePath, packPath),
+  searchConfigs: (searchTerm, packPath) => ipcRenderer.invoke('search-configs', searchTerm, packPath),
+  editFile: (filePath, packPath, oldText, newText) => ipcRenderer.invoke('edit-file', filePath, packPath, oldText, newText),
+  prependFile: (filePath, packPath, newText) => ipcRenderer.invoke('prepend-file', filePath, packPath, newText),
+  appendFile: (filePath, packPath, newText) => ipcRenderer.invoke('append-file', filePath, packPath, newText),
+  writeFile: (filePath, packPath, content) => ipcRenderer.invoke('write-file', filePath, packPath, content),
+
+  // 6. Asistente de IA Autónoma
+  askBot: (contextData, payloadHistory) => ipcRenderer.invoke('ask-bot', contextData, payloadHistory),
+  // Agrega esta línea dentro de tu contextBridge.exposeInMainWorld
+  readToml: (filePath) => ipcRenderer.invoke('read-toml', filePath),
+  // Agrega esto junto a tus otras funciones en preload.cjs
+  openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
 });
