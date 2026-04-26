@@ -4,9 +4,6 @@ import 'reactflow/dist/style.css';
 import ModNode from './components/nodes/ModNode';
 import GroupNode from './components/nodes/GroupNode';
 import ConfigEditor from './components/ConfigEditor';
-import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 const nodeTypes = { mod: ModNode, group: GroupNode };
 
@@ -78,11 +75,7 @@ export default function App() {
   const [diagnosticReport, setDiagnosticReport] = useState(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
 
-  const [isBotOpen, setIsBotOpen] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [messages, setMessages] = useState([
-    { role: 'bot', text: 'SISTEMA INICIADO: Modpack Assist. Contexto cargado. A la espera de instrucciones.' }
-  ]);
+  // Bot features removed: UI state for bot panel eliminated
 
   const [editingConfig, setEditingConfig] = useState(null);
 
@@ -95,15 +88,7 @@ export default function App() {
     setContextMenu(null);
   }, []);
 
-  const handleAskBotAboutMod = () => {
-    if (!contextMenu?.node) return;
-    const modName = contextMenu.node.data.label;
-    const query = `¿Para qué sirve el mod '${modName}' y qué configuraciones críticas debería revisar?`;
-
-    setContextMenu(null);
-    setIsBotOpen(true);
-    setChatInput(query);
-  };
+  // Bot feature removed: handleAskBotAboutMod eliminated
 
   const processScanResult = (result) => {
     if (!result) return;
@@ -359,92 +344,7 @@ export default function App() {
     autoLoadLastPack();
   }, []);
 
-  const handleSendMessage = async () => {
-    if (!chatInput.trim()) return;
-
-    const userText = chatInput;
-    setChatInput('');
-
-    const newHistory = [...messages, { role: 'user', text: userText }];
-    setMessages([...newHistory, { role: 'bot', text: 'Procesando consulta...' }]);
-
-    const contextData = {
-      packName: packInfo?.name || 'Desconocido',
-      mcVersion: packInfo?.gameVersion || 'Desconocida',
-      packPath: packInfo?.path
-    };
-
-    let currentHistoryForAI = newHistory.map(msg => ({
-      role: msg.role === 'bot' ? 'assistant' : 'user',
-      content: msg.text
-    }));
-
-    let isAgentWorking = true;
-    let finalBotMessage = '';
-
-    try {
-      while (isAgentWorking) {
-        if (!window.electronAPI) throw new Error("API de Electron inactiva");
-
-        let payloadHistory = currentHistoryForAI.length > 4
-          ? [currentHistoryForAI[0], ...currentHistoryForAI.slice(-3)]
-          : currentHistoryForAI;
-
-        const botResponse = await window.electronAPI.askBot(contextData, payloadHistory);
-
-        if (botResponse.startsWith('[ACCION:')) {
-          const cleanAction = botResponse.replace(/^\[|\]$/g, '');
-          const parts = cleanAction.split('|').map(p => p.trim());
-          const actionType = parts[0];
-
-          let toolResult = "";
-
-          if (actionType === 'ACCION: LEER_ARCHIVO') setMessages([...newHistory, { role: 'bot', text: `Extrayendo datos de ${parts[1]}...` }]);
-          else if (actionType === 'ACCION: BUSCAR_TEXTO') setMessages([...newHistory, { role: 'bot', text: `Ejecutando búsqueda: "${parts[1]}"...` }]);
-          else setMessages([...newHistory, { role: 'bot', text: `Escribiendo modificaciones en I/O...` }]);
-
-          switch (actionType) {
-            case 'ACCION: LISTAR_ARCHIVOS':
-              toolResult = `SISTEMA: Archivos detectados: ${parts[1]}`;
-              break;
-            case 'ACCION: LEER_ARCHIVO':
-              toolResult = await window.electronAPI.readFile(parts[1], contextData.packPath);
-              break;
-            case 'ACCION: BUSCAR_TEXTO':
-              toolResult = await window.electronAPI.searchConfigs(parts[1], contextData.packPath);
-              break;
-            case 'ACCION: EDITAR':
-              const editRes = await window.electronAPI.editFile(parts[1], contextData.packPath, parts[2], parts[3]);
-              toolResult = `SISTEMA: ${editRes.message}`;
-              break;
-            case 'ACCION: AGREGAR_AL_INICIO':
-              const prepRes = await window.electronAPI.prependFile(parts[1], contextData.packPath, parts[2]);
-              toolResult = `SISTEMA: ${prepRes.message}`;
-              break;
-            case 'ACCION: AGREGAR_AL_FINAL':
-              const appRes = await window.electronAPI.appendFile(parts[1], contextData.packPath, parts[2]);
-              toolResult = `SISTEMA: ${appRes.message}`;
-              break;
-            default:
-              toolResult = "SISTEMA: Acción desconocida/inválida.";
-          }
-
-          currentHistoryForAI.push({ role: 'assistant', content: botResponse });
-          currentHistoryForAI.push({ role: 'user', content: `[RESULTADO I/O]:\n${toolResult}\nDIRECTIVA: Evaluar resultado. Si el objetivo se cumple, reportar al usuario. Si se requiere más información, ejecutar siguiente herramienta.` });
-
-        } else {
-          isAgentWorking = false;
-          finalBotMessage = botResponse;
-        }
-      }
-
-      setMessages([...newHistory, { role: 'bot', text: finalBotMessage }]);
-
-    } catch (err) {
-      console.error("Error crítico de agente:", err);
-      setMessages([...newHistory, { role: 'bot', text: 'Error I/O: Fallo en la comunicación con el modelo de lenguaje.' }]);
-    }
-  };
+  // Bot feature removed: handleSendMessage removed
 
   const filteredFiles = useMemo(() => {
     return rootFiles.filter(file => {
@@ -909,107 +809,10 @@ export default function App() {
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <button
-            onClick={() => setIsBotOpen(!isBotOpen)}
-            style={{
-              background: isBotOpen ? '#f38ba8' : '#a6e3a1',
-              color: '#11111b', border: 'none', padding: '8px 15px',
-              borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold',
-              transition: 'all 0.3s ease', boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
-            }}
-          >
-            {isBotOpen ? 'Cerrar Asistente' : '🤖 Asistente IA'}
-          </button>
-          <div style={{ textAlign: 'right' }}><b style={{ color: '#cba6f7' }}>Modpack Assist</b> v1.0</div>
-        </div>
+        {/* Bot button removed: IA panel disabled */}
       </div>
 
-      {/* --- PANEL LATERAL DEL CHAT --- */}
-      <div style={{
-        position: 'absolute', top: '70px', right: isBotOpen ? '0' : '-400px',
-        width: '400px', height: 'calc(100vh - 70px)', background: '#181825',
-        borderLeft: '2px solid #313244', transition: 'right 0.3s ease-in-out',
-        zIndex: 20, display: 'flex', flexDirection: 'column', boxShadow: '-5px 0 20px rgba(0,0,0,0.5)'
-      }}>
-        <div style={{ padding: '20px', borderBottom: '1px solid #313244', background: '#11111b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h3 style={{ margin: 0, color: '#a6e3a1', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>🧠</span> Modpack AI
-            </h3>
-            <p style={{ margin: '5px 0 0 0', fontSize: '12px', color: '#a6adc8' }}>Potenciado por OpenRouter (Llama 3)</p>
-          </div>
-        </div>
-
-        <div style={{ flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          {messages.map((msg, i) => (
-            <div key={i} style={{
-              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              background: msg.role === 'user' ? '#cba6f7' : '#313244',
-              color: msg.role === 'user' ? '#11111b' : '#cdd6f4',
-              padding: '12px 15px', borderRadius: '12px', maxWidth: '85%',
-              borderBottomRightRadius: msg.role === 'user' ? '4px' : '12px',
-              borderBottomLeftRadius: msg.role === 'bot' ? '4px' : '12px',
-              fontSize: '14px', lineHeight: '1.4', wordBreak: 'break-word'
-            }}>
-              {msg.role === 'bot' ? (
-                <ReactMarkdown
-                  components={{
-                    code({ node, inline, className, children, ...props }) {
-                      const match = /language-(\w+)/.exec(className || '');
-                      return !inline && match ? (
-                        <SyntaxHighlighter
-                          children={String(children).replace(/\n$/, '')}
-                          style={vscDarkPlus}
-                          language={match[1]}
-                          PreTag="div"
-                          customStyle={{ borderRadius: '6px', margin: '10px 0', fontSize: '12px' }}
-                          {...props}
-                        />
-                      ) : (
-                        <code style={{ background: '#181825', color: '#f38ba8', padding: '2px 5px', borderRadius: '4px', fontSize: '13px' }} {...props}>
-                          {children}
-                        </code>
-                      )
-                    }
-                  }}
-                >
-                  {msg.text}
-                </ReactMarkdown>
-              ) : (
-                msg.text
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ padding: '20px', borderTop: '1px solid #313244', display: 'flex', gap: '10px', background: '#181825' }}>
-          <input
-            type="text"
-            placeholder="Instrucciones para el Agente..."
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-            style={{
-              flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #313244',
-              background: '#11111b', color: '#cdd6f4', outline: 'none', fontSize: '14px'
-            }}
-          />
-          <button
-            onClick={handleSendMessage}
-            style={{
-              background: '#89b4fa', color: '#11111b', border: 'none',
-              borderRadius: '8px', padding: '0 20px', cursor: 'pointer',
-              fontWeight: 'bold', fontSize: '16px', transition: 'transform 0.1s'
-            }}
-            onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
-            onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          >
-            ➤
-          </button>
-        </div>
-      </div>
+      {/* Bot panel removed: IA UI eliminated to keep project intact */}
 
       {/* --- CONTENIDO PRINCIPAL --- */}
       <div id="main-scroll-area" style={{ width: '100%', height: '100%', paddingTop: '70px', overflowY: 'auto', boxSizing: 'border-box' }}>
@@ -1085,7 +888,7 @@ export default function App() {
                             <b style={{ color: '#cba6f7' }}>{file.includes('.') ? '📄' : '📁'} {file}</b>
                           </div>
                           <p style={{ margin: 0, color: '#a6adc8', fontSize: '13px', fontStyle: 'italic' }}>
-                            {analyzeFilePurpose(file, language)} {/* Asumiendo que implementaste el diccionario i18n */}
+                            {analyzeFilePurpose(file)} {/* Asumiendo que implementaste el diccionario i18n */}
                           </p>
                         </div>
 

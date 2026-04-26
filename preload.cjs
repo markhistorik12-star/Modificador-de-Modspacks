@@ -28,9 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   appendFile: (filePath, packPath, newText) => ipcRenderer.invoke('append-file', filePath, packPath, newText),
   writeFile: (filePath, packPath, content) => ipcRenderer.invoke('write-file', filePath, packPath, content),
 
-  // 6. Asistente de IA Autónoma
-  askBot: (contextData, payloadHistory) => ipcRenderer.invoke('ask-bot', contextData, payloadHistory),
-  // Agrega esta línea dentro de tu contextBridge.exposeInMainWorld
+  // Bot removed: IA autónoma handler removed
   readToml: (filePath) => ipcRenderer.invoke('read-toml', filePath),
   // Agrega esto junto a tus otras funciones en preload.cjs
   openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
