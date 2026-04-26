@@ -75,7 +75,7 @@ export default function App() {
   const [diagnosticReport, setDiagnosticReport] = useState(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
 
-  // Bot features removed: UI state for bot panel eliminated
+  const [folderView, setFolderView] = useState(null); 
 
   const [editingConfig, setEditingConfig] = useState(null);
 
@@ -394,16 +394,26 @@ export default function App() {
     }
   };
 
-  const onNodeClick = async (event, node) => {
+ const onNodeClick = async (event, node) => {
     if (node.id.startsWith('cfg-') && window.electronAPI && packInfo) {
       const fileName = node.data.label.replace('⚙️ ', '').trim();
       const relativePath = `config/${fileName}`;
 
+      // SI ES CARPETA (Sin extensión)
+      if (!fileName.includes('.')) {
+        const result = await window.electronAPI.listFolderContent(relativePath, packInfo.path);
+        if (result.success) {
+          setFolderView({ name: fileName, path: relativePath, files: result.files });
+        } else {
+          alert("No se pudo leer el contenido de la carpeta.");
+        }
+        return;
+      }
+
+      // SI ES ARCHIVO (Comportamiento normal)
       const result = await window.electronAPI.readFullFile(relativePath, packInfo.path);
       if (result.success) {
         setEditingConfig({ name: fileName, path: relativePath, content: result.content });
-      } else {
-        alert("No se pudo leer el archivo de configuración.");
       }
     }
   };
@@ -411,12 +421,23 @@ export default function App() {
   const handleOpenGlobalFile = async (fileName) => {
     if (!window.electronAPI || !packInfo) return;
     
+    // 1. EL BYPASS: Si el archivo NO tiene extensión (no hay punto en el nombre)
+    if (!fileName.includes('.')) {
+      // Lo mandamos directamente a tu editor externo (VS Code)
+      const extResult = await window.electronAPI.openExternalEditor(fileName, packInfo.path);
+      
+      if (!extResult.success) {
+        alert(`Fallo al abrir en editor externo: ${extResult.message}`);
+      }
+      return; // Detenemos la función aquí para que no intente abrir el editor interno
+    }
+
+    // 2. Comportamiento normal para archivos con extensión (.json, .toml, .cfg)
     const result = await window.electronAPI.readFullFile(fileName, packInfo.path);
     
     if (result.success) {
       setEditingConfig({ name: fileName, path: fileName, content: result.content });
     } else {
-      // ✨ Ahora nos mostrará la verdad
       alert(result.message);
     }
   };
@@ -548,6 +569,38 @@ export default function App() {
           onSave={handleSaveConfig}
           onOpenExternal={handleOpenExternal}
         />
+      )}
+
+      {/* --- MODAL: EXPLORADOR DE SUB-CARPETA --- */}
+      {folderView && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2500, background: 'rgba(17, 17, 27, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div style={{ background: '#1e1e2e', border: '2px solid #89b4fa', borderRadius: '12px', width: '400px', maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
+            <div style={{ padding: '15px 20px', borderBottom: '1px solid #313244', background: '#181825', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, color: '#89b4fa' }}>📂 {folderView.name}</h3>
+              <button onClick={() => setFolderView(null)} style={{ background: 'transparent', border: 'none', color: '#f38ba8', fontSize: '20px', cursor: 'pointer' }}>✖</button>
+            </div>
+            <div style={{ padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              {folderView.files.map((file, i) => (
+                <button
+                  key={i}
+                  onClick={async () => {
+                    const fullPath = `${folderView.path}/${file}`;
+                    const res = await window.electronAPI.readFullFile(fullPath, packInfo.path);
+                    if (res.success) {
+                      setEditingConfig({ name: file, path: fullPath, content: res.content });
+                      setFolderView(null); // Cerramos el explorador al abrir el archivo
+                    }
+                  }}
+                  style={{ textAlign: 'left', padding: '10px', background: '#11111b', color: '#cdd6f4', border: '1px solid #313244', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s' }}
+                  onMouseEnter={(e) => e.target.style.background = '#313244'}
+                  onMouseLeave={(e) => e.target.style.background = '#11111b'}
+                >
+                  📄 {file}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* --- MODAL: ASISTENTE DE NUEVO PROYECTO --- */}

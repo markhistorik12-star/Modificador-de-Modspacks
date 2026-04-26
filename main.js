@@ -678,6 +678,19 @@ app.whenReady().then(() => {
 
 }); 
 
+//  Escanear contenido de una subcarpeta ---
+  ipcMain.handle('list-folder-content', async (event, folderPath, packPath) => {
+    try {
+      const fullPath = path.join(packPath, folderPath);
+      const files = await fs.readdir(fullPath);
+      
+      // Opcional: Podrías filtrar para que no muestre carpetas dentro de carpetas si quieres
+      return { success: true, files };
+    } catch (err) {
+      return { success: false, message: err.message };
+    }
+  });
+
   
 
 app.on('window-all-closed', () => { 

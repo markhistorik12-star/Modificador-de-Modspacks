@@ -32,4 +32,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readToml: (filePath) => ipcRenderer.invoke('read-toml', filePath),
   // Agrega esto junto a tus otras funciones en preload.cjs
   openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
+
+  listFolderContent: (folderPath, packPath) => ipcRenderer.invoke('list-folder-content', folderPath, packPath),
 });
