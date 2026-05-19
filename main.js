@@ -6,12 +6,17 @@ import AdmZip from 'adm-zip';
 import toml from '@iarna/toml';
 import { exec } from 'child_process';
 import crypto from 'crypto';
+import dotenv from 'dotenv';
 
+// 1. Cargamos el .env desde la raíz de modpack_asist (Esto ya funciona)
+dotenv.config({ path: path.join(process.cwd(), '.env') });
+
+// 2. Asignamos la constante
+const CF_API_KEY = process.env.CURSEFORGE_API_KEY;
+
+// 5. Recreamos __filename y __dirname para tus otras funciones
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const CF_API_KEY = '$2a$10$MmIpTK5W7qkBvn2Sj1AOteN2rnksldwgpQkEVsYg6irZiU3VtTaje';
-
 async function handleFolderOpen(event, knownPath) { 
   let rootPath = knownPath;
 
@@ -347,7 +352,6 @@ app.whenReady().then(() => {
         source: 'modrinth'
       }));
 
-      // --- 2. CURSEFORGE ---
       // --- 2. CURSEFORGE (BÚSQUEDA) ---
       let curseResults = [];
       try {

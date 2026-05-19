@@ -73,6 +73,12 @@ const analyzeFilePurpose = (fileName) => {
 };
 
 export default function App() {
+  const [toast, setToast] = useState({ show: false, title: '', message: '', type: 'success' });
+
+  const showToast = (title, message, type = 'success') => {
+    setToast({ show: true, title, message, type });
+    setTimeout(() => setToast({ show: false, title: '', message: '', type: 'success' }), 4000);
+  };
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [packInfo, setPackInfo] = useState(null);
@@ -637,13 +643,40 @@ export default function App() {
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'sans-serif', overflow: 'hidden' }}>
 
+      {/* --- INYECCIÓN DE MOTOR DE ANIMACIONES CSS --- */}
+      <style>{`
+        @keyframes fadeSlideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes popIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(100px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        .animate-tab { 
+          animation: fadeSlideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; 
+        }
+        .animate-modal { 
+          animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; 
+        }
+        .toast-enter {
+          animation: slideInRight 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        /* Efecto de presión suave para botones */
+        button { transition: all 0.2s ease-in-out; }
+        button:active:not(:disabled) { transform: scale(0.95); }
+      `}</style>
+
       {/* --- ENTORNO DE EDICIÓN: SIDEBAR + EDITOR --- */}
       {(sidebarFiles || editingConfig) && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 3000, background: '#11111b', display: 'flex' }}>
-
           {/* SIDEBAR PERSISTENTE */}
           {sidebarFiles && (
-            <div style={{ width: '280px', background: '#181825', borderRight: '1px solid #313244', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <div className="animate-tab" style={{ width: '280px', background: '#181825', borderRight: '1px solid #313244', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
               <div style={{ padding: '15px', borderBottom: '1px solid #313244', color: '#89b4fa', fontSize: '13px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📂 {sidebarFiles.title.toUpperCase()}</span>
                 <button onClick={() => { setSidebarFiles(null); setEditingConfig(null); }} style={{ background: 'transparent', border: 'none', color: '#f38ba8', cursor: 'pointer', fontSize: '16px' }}>✖</button>
@@ -668,7 +701,7 @@ export default function App() {
                             content: res.content
                           });
                         } else {
-                          alert(res.message);
+                          showToast("Error de lectura", res.message, "error");
                         }
                       }}
                       style={{
@@ -687,7 +720,7 @@ export default function App() {
           )}
 
           {/* EDITOR */}
-          <div style={{ flex: 1, position: 'relative' }}>
+          <div className="animate-tab" style={{ flex: 1, position: 'relative' }}>
             {editingConfig ? (
               <ConfigEditor
                 fileName={editingConfig.name}
@@ -709,7 +742,7 @@ export default function App() {
       {/* --- MODAL: ASISTENTE DE NUEVO PROYECTO --- */}
       {isCreatingProject && (
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2000, background: 'rgba(17, 17, 27, 0.9)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ background: '#1e1e2e', border: '2px solid #a6e3a1', borderRadius: '12px', width: '450px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.8)' }}>
+          <div className="animate-modal" style={{ background: '#1e1e2e', border: '2px solid #a6e3a1', borderRadius: '12px', width: '450px', padding: '30px', boxShadow: '0 10px 40px rgba(0,0,0,0.8)' }}>
             <h2 style={{ color: '#a6e3a1', marginTop: 0 }}>✨ Crear Entorno Virtual</h2>
             <p style={{ color: '#a6adc8', fontSize: '14px', marginBottom: '25px' }}>Configura los parámetros base de tu nuevo Modpack.</p>
 
@@ -764,7 +797,7 @@ export default function App() {
           background: 'rgba(17, 17, 27, 0.8)', backdropFilter: 'blur(5px)',
           display: 'flex', justifyContent: 'center', alignItems: 'center'
         }}>
-          <div style={{
+          <div className="animate-modal" style={{
             background: 'linear-gradient(135deg, #1b1e2a 0%, #2a2f62 100%)', border: '2px solid #89b4fa', borderRadius: '14px',
             width: '520px', maxHeight: '72vh', display: 'flex', flexDirection: 'column',
             boxShadow: '0 14px 40px rgba(0,0,0,0.5)', overflow: 'hidden'
@@ -805,7 +838,7 @@ export default function App() {
       {/* --- MODAL: REPORTE DE DIAGNÓSTICO --- */}
       {diagnosticReport && (
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 3000, background: 'rgba(17, 17, 27, 0.9)', backdropFilter: 'blur(5px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ background: '#1e1e2e', border: `2px solid ${diagnosticReport.errors.length > 0 ? '#f38ba8' : '#a6e3a1'}`, borderRadius: '12px', width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
+          <div className="animate-modal" style={{ background: '#1e1e2e', border: `2px solid ${diagnosticReport.errors.length > 0 ? '#f38ba8' : '#a6e3a1'}`, borderRadius: '12px', width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.8)', overflow: 'hidden' }}>
 
             <div style={{ padding: '20px', borderBottom: '1px solid #313244', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#181825' }}>
               <h2 style={{ margin: 0, color: diagnosticReport.errors.length > 0 ? '#f38ba8' : '#a6e3a1', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -868,7 +901,7 @@ export default function App() {
 
       {/* --- MENU CONTEXTUAL CLICK DERECHO --- */}
       {contextMenu && (
-        <div style={{
+        <div className="animate-modal" style={{
           position: 'absolute', top: contextMenu.y, left: contextMenu.x, zIndex: 100,
           background: 'linear-gradient(135deg, #1b1e2a 0%, #232037 100%)', border: '1px solid #7c88ff', borderRadius: '10px',
           boxShadow: '0 6px 18px rgba(0,0,0,.4)', padding: '6px',
@@ -915,7 +948,10 @@ export default function App() {
 
           {packInfo && (
             <>
-              <button onClick={handleExportModpack} style={{
+              <button onClick={() => {
+                showToast("Empaquetando...", "Comprimiendo tus mods. Esto puede tardar.", "loading");
+                handleExportModpack(); // Recuerda reemplazar el alert por showToast en esta función
+              }} style={{
                 background: '#f9e2af', color: '#11111b', border: 'none',
                 padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer',
                 boxShadow: '0 0 10px rgba(249, 226, 175, 0.4)'
@@ -972,7 +1008,7 @@ export default function App() {
 
       {showDetails && selectedMod && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-          <div style={{ width: '720px', maxHeight: '80vh', overflowY: 'auto', background: '#1e1e2e', border: '2px solid #cba6f7', borderRadius: '12px', padding: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+          <div className="animate-modal" style={{ width: '720px', maxHeight: '80vh', overflowY: 'auto', background: '#1e1e2e', border: '2px solid #cba6f7', borderRadius: '12px', padding: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #313244', paddingBottom: 8 }}>
               <h3 style={{ margin: 0, color: '#cba6f7' }}>{selectedMod.title}</h3>
               <button onClick={() => setShowDetails(false)} style={{ background: 'transparent', border: '1px solid #313244', color: '#cdd6f4', borderRadius: 6, padding: '6px 10px', cursor: 'pointer' }}>Cerrar</button>
@@ -1002,7 +1038,7 @@ export default function App() {
       <div id="main-scroll-area" style={{ width: '100%', height: '100%', paddingTop: '70px', overflowY: 'auto', boxSizing: 'border-box' }}>
 
         {activeTab === 'mods' && (
-          <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 70px)' }}>
+          <div className="animate-tab" style={{ position: 'relative', width: '100%', height: 'calc(100vh - 70px)' }}>
             <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 50, display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: 8, background: 'rgba(20,20,40,0.9)', border: '1px solid #313244' }}>
               <button onClick={() => {
                 if (rfInstance?.setViewport) {
@@ -1068,7 +1104,7 @@ export default function App() {
         )}
 
         {activeTab === 'global' && (
-          <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
+          <div className="animate-tab" style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
             <h2>Configuraciones Globales</h2>
             <p style={{ color: '#a6adc8', marginBottom: '20px' }}>Estructura del directorio detectado en {packInfo?.name}</p>
 
@@ -1136,7 +1172,7 @@ export default function App() {
         )}
 
         {activeTab === 'store' && (
-          <div style={{ padding: '40px', paddingBottom: '100px', maxWidth: '1000px', margin: '0 auto' }}>
+          <div className="animate-tab" style={{ padding: '40px', paddingBottom: '100px', maxWidth: '1000px', margin: '0 auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px' }}>
               <div>
                 <h2 style={{ color: '#cba6f7', margin: 0 }}>Vitrina de Mods</h2>
@@ -1235,7 +1271,10 @@ export default function App() {
                     </div>
 
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleSelectModVersions(mod.project_id, mod.title, mod.source); }}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        handleSelectModVersions(mod.project_id, mod.title, mod.source); 
+                      }}
                       disabled={downloadingMods[mod.project_id]}
                       style={{ background: downloadingMods[mod.project_id] ? '#f9e2af' : '#a6e3a1', color: '#11111b', border: 'none', padding: '12px 25px', borderRadius: '8px', fontWeight: 'bold', cursor: downloadingMods[mod.project_id] ? 'wait' : 'pointer', transition: 'all 0.2s', minWidth: '140px' }}>
                       {downloadingMods[mod.project_id] ? '⏳ Descargando...' : '📥 Instalar'}
@@ -1256,7 +1295,7 @@ export default function App() {
 
         {/* --- PESTAÑA: CENTRO DE TWEAKS --- */}
         {activeTab === 'tweaks' && (
-          <div style={{ display: 'flex', height: 'calc(100vh - 70px)', width: '100%' }}>
+          <div className="animate-tab" style={{ display: 'flex', height: 'calc(100vh - 70px)', width: '100%' }}>
 
             {/* Menú Lateral del Centro de Tweaks */}
             <div style={{ width: '250px', background: '#181825', borderRight: '1px solid #313244', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1318,9 +1357,9 @@ export default function App() {
 
                     <button
                       onClick={async () => {
-                        if (!itemTweakData.itemId.includes(':')) return alert("El ID debe tener formato mod:item");
+                        if (!itemTweakData.itemId.includes(':')) return showToast("Error", "El ID debe tener formato mod:item", "error");
                         const res = await window.electronAPI.injectItemTweak(itemTweakData, packInfo.path);
-                        alert(res.message);
+                        showToast("Inyección KubeJS", res.message, res.success ? "success" : "error");
                         if (res.success) setItemTweakData({ itemId: '', damage: '', armor: '', toughness: '' });
                       }}
                       style={{ background: '#f5c2e7', color: '#11111b', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
@@ -1365,9 +1404,9 @@ export default function App() {
 
                     <button
                       onClick={async () => {
-                        if (!entityTweakData.entityId.includes(':')) return alert("El ID debe tener formato mod:entidad");
+                        if (!entityTweakData.entityId.includes(':')) return showToast("Error", "El ID debe tener formato mod:entidad", "error");
                         const res = await window.electronAPI.injectEntityTweak(entityTweakData, packInfo.path);
-                        alert(res.message);
+                        showToast("Mutación Genética", res.message, res.success ? "success" : "error");
                         if (res.success) setEntityTweakData({ entityId: '', health: '', damage: '', speed: '' });
                       }}
                       style={{ background: '#a6e3a1', color: '#11111b', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
@@ -1415,7 +1454,7 @@ export default function App() {
                     <button style={{ marginTop: '6px', padding: '14px', borderRadius: 8, border: 'none', background: '#8ef29a', fontWeight: 'bold', cursor: 'pointer' }} onClick={async () => {
                       const packPath = packInfo?.path || localStorage.getItem('lastModpackPath');
                       const res = await window.electronAPI.injectSpawnControl(spawnCenter, packPath);
-                      alert(res?.message || 'Acción ejecutada');
+                      showToast("Regla de Spawn", res?.message || 'Acción ejecutada', "success");
                     }}>⚡ Inyectar Mutación de Spawn</button>
                   </div>
                 </div>
@@ -1441,9 +1480,9 @@ export default function App() {
                         const packPath = packInfo?.path || localStorage.getItem('lastModpackPath');
                         const patchObj = JSON.parse(lootCenter.patch || '{}');
                         const res = await window.electronAPI.lootEditorApply(packPath, lootCenter.lootPath, patchObj);
-                        alert(res?.message || 'Loot aplicado');
+                        showToast("Editor de Loot", res?.message || 'Loot aplicado con éxito', "success");
                       } catch (err) {
-                        alert('JSON patch inválido. Asegúrate de que tenga una sintaxis JSON correcta.');
+                        showToast("Error de Formato", 'JSON patch inválido. Revisa la sintaxis.', "error");
                       }
                     }}>⚡ Aplicar Loot Patch</button>
                   </div>
@@ -1455,6 +1494,27 @@ export default function App() {
         )}
 
       </div>
+
+      {/* --- SISTEMA DE NOTIFICACIONES TOAST (Personalizado) --- */}
+      {toast && toast.show && (
+        <div className="toast-enter" style={{
+          position: 'fixed', bottom: '30px', right: '30px', zIndex: 9999,
+          background: toast.type === 'success' ? 'linear-gradient(135deg, #a6e3a1 0%, #40a02b 100%)' : 
+                      toast.type === 'loading' ? 'linear-gradient(135deg, #89b4fa 0%, #1e66f5 100%)' : 
+                      'linear-gradient(135deg, #f38ba8 0%, #d20f39 100%)',
+          color: '#11111b', padding: '18px 24px', borderRadius: '14px', 
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: '15px'
+        }}>
+          <span style={{ fontSize: '28px', filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.3))' }}>
+            {toast.type === 'success' ? '✅' : toast.type === 'loading' ? '⏳' : '❌'}
+          </span>
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: '900', letterSpacing: '0.5px' }}>{toast.title}</div>
+            <div style={{ fontSize: '13px', fontWeight: '600', opacity: 0.9, marginTop: '2px' }}>{toast.message}</div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
