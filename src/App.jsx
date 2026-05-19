@@ -7,6 +7,41 @@ import ConfigEditor from './components/ConfigEditor';
 
 const nodeTypes = { mod: ModNode, group: GroupNode };
 
+const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorClass }) => {
+  const [showDropdown, setShowDropdown] = useState(false);
+  const suggestions = value.length > 2
+    ? availableIds.filter(id => id.toLowerCase().includes(value.toLowerCase())).slice(0, 50)
+    : [];
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        type="text" placeholder={placeholder} value={value}
+        onChange={(e) => { onChange(e.target.value.toLowerCase()); setShowDropdown(true); }}
+        onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
+        onFocus={() => setShowDropdown(true)}
+        style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: colorClass, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+      />
+      {showDropdown && suggestions.length > 0 && (
+        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#181825', border: '1px solid #cba6f7', borderRadius: '8px', zIndex: 100, maxHeight: '250px', overflowY: 'auto', padding: 0, margin: '4px 0 0 0', listStyle: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.8)' }}>
+          {suggestions.map((s, i) => (
+            <li 
+              key={i} 
+              // CORRECCIÓN AQUÍ: onMouseDown en lugar de onClick, y prevemos que el input pierda el foco
+              onMouseDown={(e) => { e.preventDefault(); onChange(s); setShowDropdown(false); }} 
+              style={{ padding: '10px 15px', cursor: 'pointer', color: '#cdd6f4', borderBottom: '1px solid #313244', fontSize: '13px' }} 
+              onMouseEnter={e => e.target.style.background = '#313244'} 
+              onMouseLeave={e => e.target.style.background = 'transparent'}
+            >
+              {s}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 // --- ANALIZADOR HEURÍSTICO UNIVERSAL ---
 const analyzeFilePurpose = (fileName) => {
   const name = fileName.toLowerCase();
@@ -49,18 +84,30 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('mods');
   const [versionSelectorModal, setVersionSelectorModal] = useState(null);
 
-  // Estado para el modal de Nuevo Proyecto
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ name: '', mcVersion: '1.20.1', loader: 'Forge' });
   const [availableGameVersions, setAvailableGameVersions] = useState([]);
 
-  // --- ESTADOS DE LOS BUSCADORES ---
   const [searchTerm, setSearchTerm] = useState('');
   const [searchMods, setSearchMods] = useState('');
   const [rfInstance, setRfInstance] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
 
-  // --- ESTADOS DE LA TIENDA (MODRINTH) ---
+  const [availableIds, setAvailableIds] = useState([]);
+
+  // --- ESTADOS DEL CENTRO DE TWEAKS ---
+  const [activeTweakTab, setActiveTweakTab] = useState('items');
+  const [itemTweakData, setItemTweakData] = useState({ itemId: '', damage: '', armor: '', toughness: '' });
+  const [entityTweakData, setEntityTweakData] = useState({ entityId: '', health: '', damage: '', speed: '' });
+  const [spawnCenter, setSpawnCenter] = useState({ entityId: 'minecraft:zombie', health: 20, speed: 0.2, damage: 5 });
+  const [lootCenter, setLootCenter] = useState({ lootPath: 'data/minecraft/loot_tables/entities/zombie.json', patch: '{"sample":1}' });
+
+  // UI hooks antiguos (mantenidos por compatibilidad pero ya no se usan como modales)
+  const [spawnModalOpen, setSpawnModalOpen] = useState(false);
+  const [spawnForm, setSpawnForm] = useState({ entityId: '', health: '', speed: '', damage: '' });
+  const [lootModalOpen, setLootModalOpen] = useState(false);
+  const [lootForm, setLootForm] = useState({ lootPath: '', patch: '' });
+
   const [onlineSearchQuery, setOnlineSearchQuery] = useState('');
   const [onlineResults, setOnlineResults] = useState([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
@@ -71,12 +118,15 @@ export default function App() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-
   const [diagnosticReport, setDiagnosticReport] = useState(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
 
-  const [folderView, setFolderView] = useState(null); 
+  const [selectedMod, setSelectedMod] = useState(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [visibleOnlineCount, setVisibleOnlineCount] = useState(20);
 
+  const [sidebarFiles, setSidebarFiles] = useState(null);
+  const [graphZoom, setGraphZoom] = useState(1);
   const [editingConfig, setEditingConfig] = useState(null);
 
   const onNodeContextMenu = useCallback((event, node) => {
@@ -88,7 +138,10 @@ export default function App() {
     setContextMenu(null);
   }, []);
 
-  // Bot feature removed: handleAskBotAboutMod eliminated
+  const handleAskBotAboutMod = () => {
+    alert("🤖 La función de análisis con IA ha sido deshabilitada temporalmente en esta versión.");
+    setContextMenu(null);
+  };
 
   const processScanResult = (result) => {
     if (!result) return;
@@ -192,7 +245,7 @@ export default function App() {
             icon: mod.icon,
             hasConfigs: mod.configs.length > 0
           },
-          style: { zIndex: 1 }
+          style: { zIndex: 1, borderRadius: 12, boxShadow: '0 6px 14px rgba(0,0,0,.25)', background: '#1e1e2e', border: '1px solid #37334a' }
         });
 
         mod.configs.forEach((cfg, cIndex) => {
@@ -211,6 +264,7 @@ export default function App() {
           newEdges.push({
             id: `edge-${modId}-${cfgId}`,
             source: modId, target: cfgId, animated: true,
+            type: 'smoothstep',
             style: { stroke: '#94e2d5', strokeWidth: 2, zIndex: 1 },
           });
         });
@@ -226,7 +280,14 @@ export default function App() {
   const handleScanFolder = async () => {
     if (window.electronAPI) {
       const result = await window.electronAPI.scanMods();
-      processScanResult(result);
+      if (result && result.info) {
+        processScanResult(result);
+        // Limpiamos la ruta para asegurar que termine en /mods sin duplicarse
+        const cleanPath = result.info.path.replace(/[\\\/]mods[\\\/]?$/, '');
+        const modPath = cleanPath + '/mods';
+        const ids = await window.electronAPI.scanModIds(modPath);
+        setAvailableIds(ids);
+      }
     }
   };
 
@@ -315,7 +376,20 @@ export default function App() {
         const result = await window.electronAPI.installModRecursively(version.id, packInfo.gameVersion, packInfo.loader, packInfo.path);
         console.log("Log de instalación:", result.logs);
       } else {
-        await window.electronAPI.downloadMod(version, packInfo.path);
+        const result = await window.electronAPI.downloadMod(version, packInfo.path);
+
+        if (result && !result.success) {
+          if (result.errorCode === 'RESTRICTED_BY_AUTHOR') {
+            alert(
+              `⚠️ Descarga Restringida por el Autor\n\n` +
+              `${result.message}\n\n` +
+              `Abre tu navegador, busca "${modTitle}" en CurseForge y descárgalo manualmente en tu carpeta 'mods/'.`
+            );
+          } else {
+            alert(`❌ Error al descargar: ${result.message}`);
+          }
+          return;
+        }
       }
 
       const scanResult = await window.electronAPI.scanMods(packInfo.path);
@@ -333,18 +407,21 @@ export default function App() {
       if (lastPath && window.electronAPI) {
         try {
           const result = await window.electronAPI.scanMods(lastPath);
-          if (result) processScanResult(result);
+          if (result && result.info) {
+            processScanResult(result);
+            const cleanPath = result.info.path.replace(/[\\\/]mods[\\\/]?$/, '');
+            const modPath = cleanPath + '/mods';
+            const ids = await window.electronAPI.scanModIds(modPath);
+            setAvailableIds(ids);
+          }
         } catch (e) {
           console.warn("No se pudo auto-cargar la carpeta anterior.", e);
           localStorage.removeItem('lastModpackPath');
         }
       }
     };
-
     autoLoadLastPack();
   }, []);
-
-  // Bot feature removed: handleSendMessage removed
 
   const filteredFiles = useMemo(() => {
     return rootFiles.filter(file => {
@@ -394,23 +471,19 @@ export default function App() {
     }
   };
 
- const onNodeClick = async (event, node) => {
+  const onNodeClick = async (event, node) => {
     if (node.id.startsWith('cfg-') && window.electronAPI && packInfo) {
       const fileName = node.data.label.replace('⚙️ ', '').trim();
       const relativePath = `config/${fileName}`;
 
-      // SI ES CARPETA (Sin extensión)
       if (!fileName.includes('.')) {
         const result = await window.electronAPI.listFolderContent(relativePath, packInfo.path);
         if (result.success) {
-          setFolderView({ name: fileName, path: relativePath, files: result.files });
-        } else {
-          alert("No se pudo leer el contenido de la carpeta.");
+          setSidebarFiles({ title: fileName, path: relativePath, files: result.files, isJar: false });
         }
         return;
       }
 
-      // SI ES ARCHIVO (Comportamiento normal)
       const result = await window.electronAPI.readFullFile(relativePath, packInfo.path);
       if (result.success) {
         setEditingConfig({ name: fileName, path: relativePath, content: result.content });
@@ -420,21 +493,17 @@ export default function App() {
 
   const handleOpenGlobalFile = async (fileName) => {
     if (!window.electronAPI || !packInfo) return;
-    
-    // 1. EL BYPASS: Si el archivo NO tiene extensión (no hay punto en el nombre)
+
     if (!fileName.includes('.')) {
-      // Lo mandamos directamente a tu editor externo (VS Code)
       const extResult = await window.electronAPI.openExternalEditor(fileName, packInfo.path);
-      
       if (!extResult.success) {
         alert(`Fallo al abrir en editor externo: ${extResult.message}`);
       }
-      return; // Detenemos la función aquí para que no intente abrir el editor interno
+      return;
     }
 
-    // 2. Comportamiento normal para archivos con extensión (.json, .toml, .cfg)
     const result = await window.electronAPI.readFullFile(fileName, packInfo.path);
-    
+
     if (result.success) {
       setEditingConfig({ name: fileName, path: fileName, content: result.content });
     } else {
@@ -504,13 +573,11 @@ export default function App() {
         }
         return node;
       }));
-
     } else {
       alert(`Error en el diagnóstico: ${result?.message}`);
     }
   };
 
-  // ✨ AQUÍ ESTÁ LA FUNCIÓN REPARADA ✨
   const handleNodesDelete = async (deletedNodes) => {
     for (const node of deletedNodes) {
       console.log("🔍 Intentando borrar el nodo:", node);
@@ -521,7 +588,6 @@ export default function App() {
         fileName = fileName.replace('mod-', '');
       }
 
-      // LA CLÁUSULA DE GUARDIA CORRECTA
       if (!fileName.endsWith('.jar')) {
         console.error(`❌ El nombre extraído no parece un archivo: ${fileName}`);
         alert(`Error interno: React intentó borrar algo que no es un .jar (${fileName})`);
@@ -543,62 +609,99 @@ export default function App() {
     }
   };
 
-  const cargarConfiguracion = async (rutaDelServerConfig) => {
-    const respuesta = await window.electronAPI.readToml(rutaDelServerConfig);
+  const onNodeDoubleClick = async (event, node) => {
+    if (node.type === 'mod' && window.electronAPI && packInfo) {
+      const jarName = node.id.replace('mod-', '');
 
-    if (respuesta.success) {
-      // ¡Magia! Ahora es un objeto de JavaScript fácil de leer
-      console.log("Configuración cargada:", respuesta.data);
+      console.log(`🕵️‍♂️ Escaneando el interior del mod: ${jarName}`);
 
-      // Si el TOML decía: damage = 50
-      // Puedes acceder a él usando: respuesta.data.damage
-    } else {
-      console.error("No se pudo leer el archivo:", respuesta.error);
+      const result = await window.electronAPI.exploreJarContents(jarName, packInfo.path);
+
+      if (result.success) {
+        if (result.files.length === 0) {
+          alert(`El mod ${node.data.label} no expone archivos JSON de recetas ni configuraciones por defecto.`);
+        } else {
+          setSidebarFiles({
+            title: node.data.label,
+            jarName: jarName,
+            files: result.files,
+            isJar: true
+          });
+        }
+      } else {
+        alert(result.message);
+      }
     }
   };
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#11111b', color: '#cdd6f4', fontFamily: 'sans-serif', overflow: 'hidden' }}>
 
-      {/* --- MODAL: EDITOR DE CONFIGURACIONES --- */}
-      {editingConfig && (
-        <ConfigEditor
-          fileName={editingConfig.name}
-          initialContent={editingConfig.content}
-          onClose={() => setEditingConfig(null)}
-          onSave={handleSaveConfig}
-          onOpenExternal={handleOpenExternal}
-        />
-      )}
+      {/* --- ENTORNO DE EDICIÓN: SIDEBAR + EDITOR --- */}
+      {(sidebarFiles || editingConfig) && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 3000, background: '#11111b', display: 'flex' }}>
 
-      {/* --- MODAL: EXPLORADOR DE SUB-CARPETA --- */}
-      {folderView && (
-        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2500, background: 'rgba(17, 17, 27, 0.8)', backdropFilter: 'blur(8px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-          <div style={{ background: '#1e1e2e', border: '2px solid #89b4fa', borderRadius: '12px', width: '400px', maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
-            <div style={{ padding: '15px 20px', borderBottom: '1px solid #313244', background: '#181825', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0, color: '#89b4fa' }}>📂 {folderView.name}</h3>
-              <button onClick={() => setFolderView(null)} style={{ background: 'transparent', border: 'none', color: '#f38ba8', fontSize: '20px', cursor: 'pointer' }}>✖</button>
+          {/* SIDEBAR PERSISTENTE */}
+          {sidebarFiles && (
+            <div style={{ width: '280px', background: '#181825', borderRight: '1px solid #313244', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+              <div style={{ padding: '15px', borderBottom: '1px solid #313244', color: '#89b4fa', fontSize: '13px', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📂 {sidebarFiles.title.toUpperCase()}</span>
+                <button onClick={() => { setSidebarFiles(null); setEditingConfig(null); }} style={{ background: 'transparent', border: 'none', color: '#f38ba8', cursor: 'pointer', fontSize: '16px' }}>✖</button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '10px' }}>
+                {sidebarFiles.files.map((file, i) => {
+                  const shortName = file.split('/').pop();
+                  return (
+                    <div
+                      key={i}
+                      onClick={async () => {
+                        let res;
+                        if (sidebarFiles.isJar) {
+                          res = await window.electronAPI.readJarFile(sidebarFiles.jarName, file, packInfo.path);
+                        } else {
+                          res = await window.electronAPI.readFullFile(`${sidebarFiles.path}/${file}`, packInfo.path);
+                        }
+                        if (res.success) {
+                          setEditingConfig({
+                            name: shortName,
+                            path: sidebarFiles.isJar ? `INTERNO/${file}` : `${sidebarFiles.path}/${file}`,
+                            content: res.content
+                          });
+                        } else {
+                          alert(res.message);
+                        }
+                      }}
+                      style={{
+                        padding: '10px 8px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', color: '#cdd6f4',
+                        background: editingConfig?.name === shortName ? '#313244' : 'transparent',
+                        borderLeft: editingConfig?.name === shortName ? '3px solid #89b4fa' : '3px solid transparent',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', transition: 'background 0.2s'
+                      }}
+                    >
+                      📄 {shortName}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            <div style={{ padding: '10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              {folderView.files.map((file, i) => (
-                <button
-                  key={i}
-                  onClick={async () => {
-                    const fullPath = `${folderView.path}/${file}`;
-                    const res = await window.electronAPI.readFullFile(fullPath, packInfo.path);
-                    if (res.success) {
-                      setEditingConfig({ name: file, path: fullPath, content: res.content });
-                      setFolderView(null); // Cerramos el explorador al abrir el archivo
-                    }
-                  }}
-                  style={{ textAlign: 'left', padding: '10px', background: '#11111b', color: '#cdd6f4', border: '1px solid #313244', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s' }}
-                  onMouseEnter={(e) => e.target.style.background = '#313244'}
-                  onMouseLeave={(e) => e.target.style.background = '#11111b'}
-                >
-                  📄 {file}
-                </button>
-              ))}
-            </div>
+          )}
+
+          {/* EDITOR */}
+          <div style={{ flex: 1, position: 'relative' }}>
+            {editingConfig ? (
+              <ConfigEditor
+                fileName={editingConfig.name}
+                initialContent={editingConfig.content}
+                onClose={() => setEditingConfig(null)}
+                onSave={handleSaveConfig}
+                onOpenExternal={handleOpenExternal}
+              />
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#6c7086', flexDirection: 'column', gap: '15px' }}>
+                <span style={{ fontSize: '48px' }}>📄</span>
+                <p style={{ fontSize: '16px' }}>Selecciona un archivo del panel izquierdo para empezar a editar.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -626,9 +729,7 @@ export default function App() {
                   >
                     {availableGameVersions.length > 0 ? (
                       availableGameVersions.map(v => (
-                        <option key={v.version} value={v.version}>
-                          {v.version}
-                        </option>
+                        <option key={v.version} value={v.version}>{v.version}</option>
                       ))
                     ) : (
                       <option value="1.20.1">Cargando versiones...</option>
@@ -664,9 +765,9 @@ export default function App() {
           display: 'flex', justifyContent: 'center', alignItems: 'center'
         }}>
           <div style={{
-            background: '#1e1e2e', border: '2px solid #cba6f7', borderRadius: '12px',
-            width: '500px', maxHeight: '70vh', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.8)', overflow: 'hidden'
+            background: 'linear-gradient(135deg, #1b1e2a 0%, #2a2f62 100%)', border: '2px solid #89b4fa', borderRadius: '14px',
+            width: '520px', maxHeight: '72vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 14px 40px rgba(0,0,0,0.5)', overflow: 'hidden'
           }}>
             <div style={{ padding: '20px', borderBottom: '1px solid #313244', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0, color: '#cba6f7' }}>📥 Instalar: {versionSelectorModal.title}</h3>
@@ -769,8 +870,8 @@ export default function App() {
       {contextMenu && (
         <div style={{
           position: 'absolute', top: contextMenu.y, left: contextMenu.x, zIndex: 100,
-          background: '#181825', border: '1px solid #cba6f7', borderRadius: '8px',
-          boxShadow: '0 4px 15px rgba(0,0,0,0.8)', padding: '5px',
+          background: 'linear-gradient(135deg, #1b1e2a 0%, #232037 100%)', border: '1px solid #7c88ff', borderRadius: '10px',
+          boxShadow: '0 6px 18px rgba(0,0,0,.4)', padding: '6px',
           display: 'flex', flexDirection: 'column'
         }}>
           <button
@@ -791,10 +892,10 @@ export default function App() {
 
       {/* --- BARRA SUPERIOR PROFESIONAL --- */}
       <div style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: '70px',
-        background: '#181825', display: 'flex', alignItems: 'center',
-        padding: '0 20px', zIndex: 10, borderBottom: '2px solid #313244',
-        justifyContent: 'space-between'
+        position: 'absolute', top: 0, left: 0, right: 0, height: '72px',
+        background: 'linear-gradient(135deg, #1b1e2a 0%, #2a2b50 100%)', display: 'flex', alignItems: 'center',
+        padding: '0 20px', zIndex: 10, borderBottom: '1px solid #3a3a64',
+        justifyContent: 'space-between', boxShadow: '0 6px 20px rgba(0,0,0,.25)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button onClick={handleScanFolder} style={{
@@ -857,21 +958,83 @@ export default function App() {
                 >
                   🛒 Tienda de Mods
                 </button>
+                <button
+                  onClick={() => setActiveTab('tweaks')}
+                  style={{ background: activeTab === 'tweaks' ? '#313244' : 'transparent', color: activeTab === 'tweaks' ? '#f5c2e7' : '#a6adc8', border: 'none', padding: '8px 15px', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  🧪 Centro de Tweaks
+                </button>
               </div>
             </>
           )}
         </div>
-
-        {/* Bot button removed: IA panel disabled */}
       </div>
 
-      {/* Bot panel removed: IA UI eliminated to keep project intact */}
+      {showDetails && selectedMod && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+          <div style={{ width: '720px', maxHeight: '80vh', overflowY: 'auto', background: '#1e1e2e', border: '2px solid #cba6f7', borderRadius: '12px', padding: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #313244', paddingBottom: 8 }}>
+              <h3 style={{ margin: 0, color: '#cba6f7' }}>{selectedMod.title}</h3>
+              <button onClick={() => setShowDetails(false)} style={{ background: 'transparent', border: '1px solid #313244', color: '#cdd6f4', borderRadius: 6, padding: '6px 10px', cursor: 'pointer' }}>Cerrar</button>
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+              {selectedMod.icon_url && (
+                <img src={selectedMod.icon_url} alt={selectedMod.title} style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 8 }} />
+              )}
+              <div style={{ flex: 1 }}>
+                <p style={{ color: '#a6adc8' }}>{selectedMod.description}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {selectedMod.author && <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Autor: {selectedMod.author}</span>}
+                  {selectedMod.version && <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Versión: {String(selectedMod.version)}</span>}
+                  {selectedMod.loaders?.length > 0 && <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Loaders: {selectedMod.loaders.join(', ')}</span>}
+                  {selectedMod.categories?.length > 0 && <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Tags: {selectedMod.categories.join(' / ')}</span>}
+                  {selectedMod.license && <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Licencia: {selectedMod.license}</span>}
+                  {selectedMod.dependencies?.length > 0 && (
+                    <span style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, background: '#1e1e2e', border: '1px solid #313244' }}>Dep: {selectedMod.dependencies.map(d => d.project_id || d.name || d).join(', ')}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* --- CONTENIDO PRINCIPAL --- */}
       <div id="main-scroll-area" style={{ width: '100%', height: '100%', paddingTop: '70px', overflowY: 'auto', boxSizing: 'border-box' }}>
 
         {activeTab === 'mods' && (
           <div style={{ position: 'relative', width: '100%', height: 'calc(100vh - 70px)' }}>
+            <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 50, display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: 8, background: 'rgba(20,20,40,0.9)', border: '1px solid #313244' }}>
+              <button onClick={() => {
+                if (rfInstance?.setViewport) {
+                  const newZoom = Math.min(3, graphZoom + 0.1);
+                  setGraphZoom(newZoom);
+                  rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
+                }
+              }} title="Zoom in" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#2d2f68', color: '#fff', cursor: 'pointer' }}>+</button>
+              <button onClick={() => {
+                if (rfInstance?.setViewport) {
+                  const newZoom = Math.max(0.2, graphZoom - 0.1);
+                  setGraphZoom(newZoom);
+                  rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
+                }
+              }} title="Zoom out" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#2d2f68', color: '#fff', cursor: 'pointer' }}>−</button>
+              <button onClick={() => rfInstance?.fitView?.()} title="Ajustar Vista" style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#4a5bd4', color: '#fff', cursor: 'pointer' }}>Fit</button>
+              <span style={{ color: '#cdd6f4', fontSize: 12 }}>Zoom</span>
+              <input
+                type="range" min={0.2} max={2.5} step={0.05}
+                value={graphZoom}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setGraphZoom(v);
+                  if (rfInstance && typeof rfInstance.setViewport === 'function') {
+                    rfInstance.setViewport({ x: 0, y: 0, zoom: v }, 0);
+                  } else if (rfInstance && typeof rfInstance.zoomTo === 'function') {
+                    try { rfInstance.zoomTo(v); } catch { }
+                  }
+                }}
+                style={{ width: 120 }}
+              />
+            </div>
             {nodes.length > 0 && (
               <div style={{
                 position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
@@ -893,10 +1056,10 @@ export default function App() {
               </div>
             )}
 
-            <ReactFlow nodes={displayNodes} edges={edges} onNodesChange={onNodesChange} onInit={setRfInstance} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView
+            <ReactFlow nodes={displayNodes} edges={edges} onNodesChange={onNodesChange} onInit={setRfInstance} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView minZoom={0.2} maxZoom={2.5}
               onNodeContextMenu={onNodeContextMenu}
               onPaneClick={onPaneClick} onNodeClick={onNodeClick}
-              onNodesDelete={handleNodesDelete}>
+              onNodesDelete={handleNodesDelete} onNodeDoubleClick={onNodeDoubleClick}>
               <Background color="#313244" variant="dots" gap={25} size={1} />
               <Controls />
               <MiniMap nodeColor="#cba6f7" maskColor="rgba(30, 30, 46, 0.7)" style={{ background: '#11111b' }} />
@@ -935,17 +1098,15 @@ export default function App() {
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                       }}>
 
-                        {/* Textos a la izquierda */}
                         <div style={{ flex: 1 }}>
                           <div style={{ marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <b style={{ color: '#cba6f7' }}>{file.includes('.') ? '📄' : '📁'} {file}</b>
                           </div>
                           <p style={{ margin: 0, color: '#a6adc8', fontSize: '13px', fontStyle: 'italic' }}>
-                            {analyzeFilePurpose(file)} {/* Asumiendo que implementaste el diccionario i18n */}
+                            {analyzeFilePurpose(file)}
                           </p>
                         </div>
 
-                        {/* Botón de apertura a la derecha */}
                         <button
                           onClick={() => handleOpenGlobalFile(file)}
                           style={{
@@ -953,9 +1114,6 @@ export default function App() {
                             padding: '8px 15px', borderRadius: '6px', fontWeight: 'bold',
                             cursor: 'pointer', transition: 'transform 0.1s', flexShrink: 0
                           }}
-                          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.95)'}
-                          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                         >
                           ✏️ Abrir
                         </button>
@@ -1008,7 +1166,7 @@ export default function App() {
                   value={onlineSearchQuery}
                   onChange={(e) => setOnlineSearchQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSearchOnline()}
-                  style={{ flex: 1, padding: '12px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', outline: 'none', fontSize: '15px' }}
+                  style={{ flex: 1, padding: '12px 14px', borderRadius: '10px', border: '1px solid #3a3a64', background: '#141522', color: '#e8eaff', outline: 'none', fontSize: '15px', transition: 'border 0.2s' }}
                 />
                 <button
                   onClick={handleSearchOnline} disabled={isSearchingOnline}
@@ -1046,9 +1204,9 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
               {onlineResults
-                .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                .slice(0, visibleOnlineCount)
                 .map((mod) => (
-                  <div key={mod.project_id} style={{ background: '#181825', border: '1px solid #313244', borderRadius: '12px', padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' }}>
+                  <div key={mod.project_id} style={{ background: '#181825', border: '1px solid #313244', borderRadius: '12px', padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', cursor: 'pointer' }} onClick={() => { setSelectedMod(mod); setShowDetails(true); }}>
                     <div style={{ width: '80px', height: '80px', background: '#11111b', borderRadius: '10px', overflow: 'hidden', flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                       {mod.icon_url ? <img src={mod.icon_url} alt={mod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '30px' }}>🧩</span>}
                     </div>
@@ -1077,7 +1235,7 @@ export default function App() {
                     </div>
 
                     <button
-                      onClick={() => handleSelectModVersions(mod.project_id, mod.title, mod.source)}
+                      onClick={(e) => { e.stopPropagation(); handleSelectModVersions(mod.project_id, mod.title, mod.source); }}
                       disabled={downloadingMods[mod.project_id]}
                       style={{ background: downloadingMods[mod.project_id] ? '#f9e2af' : '#a6e3a1', color: '#11111b', border: 'none', padding: '12px 25px', borderRadius: '8px', fontWeight: 'bold', cursor: downloadingMods[mod.project_id] ? 'wait' : 'pointer', transition: 'all 0.2s', minWidth: '140px' }}>
                       {downloadingMods[mod.project_id] ? '⏳ Descargando...' : '📥 Instalar'}
@@ -1086,37 +1244,216 @@ export default function App() {
                 ))}
             </div>
 
-            {onlineResults.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px', marginTop: '30px', paddingTop: '20px', borderTop: '1px solid #313244' }}>
-                <button
-                  onClick={() => {
-                    setCurrentPage(p => Math.max(1, p - 1));
-                    document.getElementById('main-scroll-area').scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  disabled={currentPage === 1}
-                  style={{ background: currentPage === 1 ? '#313244' : '#cba6f7', color: '#11111b', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', transition: 'all 0.2s' }}
-                >
-                  ⬅️ Anterior
-                </button>
-
-                <span style={{ color: '#a6adc8', fontWeight: 'bold', fontSize: '14px' }}>
-                  Página {currentPage} de {Math.ceil(onlineResults.length / itemsPerPage)}
-                </span>
-
-                <button
-                  onClick={() => {
-                    setCurrentPage(p => Math.min(Math.ceil(onlineResults.length / itemsPerPage), p + 1));
-                    document.getElementById('main-scroll-area').scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  disabled={currentPage === Math.ceil(onlineResults.length / itemsPerPage)}
-                  style={{ background: currentPage === Math.ceil(onlineResults.length / itemsPerPage) ? '#313244' : '#cba6f7', color: '#11111b', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: currentPage === Math.ceil(onlineResults.length / itemsPerPage) ? 'not-allowed' : 'pointer', transition: 'all 0.2s' }}
-                >
-                  Siguiente ➡️
+            {visibleOnlineCount < onlineResults.length && (
+              <div style={{ textAlign: 'center', marginTop: 12 }}>
+                <button onClick={() => setVisibleOnlineCount(v => Math.min(v + 20, onlineResults.length))} style={{ background: '#89b4fa', color: '#11111b', border: 'none', padding: '10px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  Cargar más resultados
                 </button>
               </div>
             )}
           </div>
         )}
+
+        {/* --- PESTAÑA: CENTRO DE TWEAKS --- */}
+        {activeTab === 'tweaks' && (
+          <div style={{ display: 'flex', height: 'calc(100vh - 70px)', width: '100%' }}>
+
+            {/* Menú Lateral del Centro de Tweaks */}
+            <div style={{ width: '250px', background: '#181825', borderRight: '1px solid #313244', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h3 style={{ color: '#f5c2e7', margin: '0 0 15px 0' }}>Módulos de Inyección</h3>
+
+              <button onClick={() => setActiveTweakTab('items')} style={{ background: activeTweakTab === 'items' ? '#313244' : 'transparent', color: activeTweakTab === 'items' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: activeTweakTab === 'items' ? '4px solid #f5c2e7' : '4px solid transparent' }}>
+                ⚔️ Ajuste de Ítems
+              </button>
+
+              <button onClick={() => setActiveTweakTab('entities')} style={{ background: activeTweakTab === 'entities' ? '#313244' : 'transparent', color: activeTweakTab === 'entities' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: activeTweakTab === 'entities' ? '4px solid #a6e3a1' : '4px solid transparent' }}>
+                🧟‍♂️ Mutador Genético
+              </button>
+
+              <button onClick={() => setActiveTweakTab('spawn')} style={{ background: activeTweakTab === 'spawn' ? '#313244' : 'transparent', color: activeTweakTab === 'spawn' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: activeTweakTab === 'spawn' ? '4px solid #8ef29a' : '4px solid transparent' }}>
+                ⚡ Control de Spawns
+              </button>
+
+              <button onClick={() => setActiveTweakTab('loot')} style={{ background: activeTweakTab === 'loot' ? '#313244' : 'transparent', color: activeTweakTab === 'loot' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: activeTweakTab === 'loot' ? '4px solid #8bdc8a' : '4px solid transparent' }}>
+                🎁 Editor de Loot
+              </button>
+            </div>
+
+            {/* Área de Trabajo Principal */}
+            <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
+
+              {activeTweakTab === 'items' && (
+                <div style={{ maxWidth: '600px' }}>
+                  <h2 style={{ color: '#cdd6f4', marginTop: 0 }}>Modificador de Armas y Armaduras</h2>
+                  <p style={{ color: '#a6adc8', marginBottom: '30px' }}>Inyecta código KubeJS para sobrescribir las estadísticas base de cualquier objeto en el juego.</p>
+
+                  <p style={{ color: '#a6e3a1', fontSize: '13px', marginTop: '-20px', marginBottom: '20px' }}>✅ Base de datos activa: {availableIds.length} objetos detectados.</p>
+
+                  <div style={{ background: '#181825', padding: '25px', borderRadius: '12px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div>
+                      <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>ID del Objeto (mod:item)</label>
+                      <AutocompleteInput
+                        placeholder="Ej: minecraft:diamond_chestplate"
+                        value={itemTweakData.itemId}
+                        availableIds={availableIds}
+                        colorClass="#a6e3a1"
+                        onChange={(val) => setItemTweakData({ ...itemTweakData, itemId: val })}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '15px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Daño de Ataque</label>
+                        <input type="number" step="0.5" placeholder="Ej: 12.5" value={itemTweakData.damage} onChange={e => setItemTweakData({ ...itemTweakData, damage: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#f38ba8', outline: 'none' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Puntos de Armadura</label>
+                        <input type="number" placeholder="Ej: 8" value={itemTweakData.armor} onChange={e => setItemTweakData({ ...itemTweakData, armor: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#89b4fa', outline: 'none' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Dureza (Toughness)</label>
+                        <input type="number" placeholder="Ej: 3" value={itemTweakData.toughness} onChange={e => setItemTweakData({ ...itemTweakData, toughness: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#f9e2af', outline: 'none' }} />
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        if (!itemTweakData.itemId.includes(':')) return alert("El ID debe tener formato mod:item");
+                        const res = await window.electronAPI.injectItemTweak(itemTweakData, packInfo.path);
+                        alert(res.message);
+                        if (res.success) setItemTweakData({ itemId: '', damage: '', armor: '', toughness: '' });
+                      }}
+                      style={{ background: '#f5c2e7', color: '#11111b', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
+                    >
+                      ⚡ Inyectar Código de Balance
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTweakTab === 'entities' && (
+                <div style={{ maxWidth: '600px' }}>
+                  <h2 style={{ color: '#cdd6f4', marginTop: 0 }}>Mutador Genético</h2>
+                  <p style={{ color: '#a6adc8', marginBottom: '30px' }}>Altera la genética de cualquier monstruo o jefe. Los cambios se aplicarán globalmente en tu mundo.</p>
+                  <p style={{ color: '#a6e3a1', fontSize: '13px', marginTop: '-20px', marginBottom: '20px' }}>✅ Base de datos activa: {availableIds.length} objetos detectados.</p>
+                  <div style={{ background: '#181825', padding: '25px', borderRadius: '12px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div>
+                      <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>ID de la Entidad (mod:mob)</label>
+                      <AutocompleteInput
+                        placeholder="Ej: minecraft:zombie o borninchaos:bone_imp"
+                        value={entityTweakData.entityId}
+                        availableIds={availableIds}
+                        colorClass="#a6e3a1"
+                        onChange={(val) => setEntityTweakData({ ...entityTweakData, entityId: val })}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '15px' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Vida Máxima (HP)</label>
+                        <input type="number" placeholder="Ej: 100" value={entityTweakData.health} onChange={e => setEntityTweakData({ ...entityTweakData, health: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#a6e3a1', outline: 'none' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Daño de Ataque</label>
+                        <input type="number" placeholder="Ej: 15" value={entityTweakData.damage} onChange={e => setEntityTweakData({ ...entityTweakData, damage: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#f38ba8', outline: 'none' }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Velocidad (Base 0.2)</label>
+                        <input type="number" step="0.05" placeholder="Ej: 0.35" value={entityTweakData.speed} onChange={e => setEntityTweakData({ ...entityTweakData, speed: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#89dceb', outline: 'none' }} />
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        if (!entityTweakData.entityId.includes(':')) return alert("El ID debe tener formato mod:entidad");
+                        const res = await window.electronAPI.injectEntityTweak(entityTweakData, packInfo.path);
+                        alert(res.message);
+                        if (res.success) setEntityTweakData({ entityId: '', health: '', damage: '', speed: '' });
+                      }}
+                      style={{ background: '#a6e3a1', color: '#11111b', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
+                    >
+                      🧬 Inyectar Mutación Genética
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTweakTab === 'spawn' && (
+                <div style={{ maxWidth: '600px' }}>
+                  <h2 style={{ color: '#cdd6f4', marginTop: 0 }}>Control de Spawns</h2>
+                  <p style={{ color: '#a6adc8', marginBottom: '30px' }}>Inyecta reglas para alterar las estadísticas de los mobs justo cuando aparecen en el mundo.</p>
+                  <p style={{ color: '#a6e3a1', fontSize: '13px', marginTop: '-20px', marginBottom: '20px' }}>✅ Base de datos activa: {availableIds.length} objetos detectados.</p>
+                  <div style={{ background: '#181825', padding: '25px', borderRadius: '12px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Entidad (mod:mob)</label>
+                        <AutocompleteInput
+                          placeholder="Ej: minecraft:zombie"
+                          value={spawnCenter.entityId}
+                          availableIds={availableIds}
+                          colorClass="#cdd6f4"
+                          onChange={(val) => setSpawnCenter({ ...spawnCenter, entityId: val })}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Vida Máxima (HP)</label>
+                        <input placeholder="Ej: 20" type="number" value={spawnCenter.health} onChange={e => setSpawnCenter({ ...spawnCenter, health: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', boxSizing: 'border-box' }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Daño de Ataque</label>
+                        <input placeholder="Ej: 5" type="number" value={spawnCenter.damage} onChange={e => setSpawnCenter({ ...spawnCenter, damage: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#f38ba8', boxSizing: 'border-box' }} />
+                      </div>
+                      <div>
+                        <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Velocidad (Base 0.2)</label>
+                        <input placeholder="Ej: 0.2" type="number" step="0.01" value={spawnCenter.speed} onChange={e => setSpawnCenter({ ...spawnCenter, speed: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#89dceb', boxSizing: 'border-box' }} />
+                      </div>
+                    </div>
+
+                    <button style={{ marginTop: '6px', padding: '14px', borderRadius: 8, border: 'none', background: '#8ef29a', fontWeight: 'bold', cursor: 'pointer' }} onClick={async () => {
+                      const packPath = packInfo?.path || localStorage.getItem('lastModpackPath');
+                      const res = await window.electronAPI.injectSpawnControl(spawnCenter, packPath);
+                      alert(res?.message || 'Acción ejecutada');
+                    }}>⚡ Inyectar Mutación de Spawn</button>
+                  </div>
+                </div>
+              )}
+
+              {activeTweakTab === 'loot' && (
+                <div style={{ maxWidth: '600px' }}>
+                  <h2 style={{ color: '#cdd6f4', marginTop: 0 }}>Editor de Loot</h2>
+                  <p style={{ color: '#a6adc8', marginBottom: '30px' }}>Aplica parches JSON para modificar las tablas de botín de tu modpack.</p>
+                  <p style={{ color: '#a6e3a1', fontSize: '13px', marginTop: '-20px', marginBottom: '20px' }}>✅ Base de datos activa: {availableIds.length} objetos detectados.</p>
+                  <div style={{ background: '#181825', padding: '25px', borderRadius: '12px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div>
+                      <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Ruta relativa (ej: data/minecraft/loot_tables/entities/zombie.json)</label>
+                      <input placeholder="Ruta del loot..." value={lootCenter.lootPath} onChange={e => setLootCenter({ ...lootCenter, lootPath: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ color: '#cdd6f4', fontSize: '12px' }}>Parche en formato JSON</label>
+                      <textarea placeholder='{"pools": [{"rolls": 1, "entries": [{"type": "item", "name": "diamond"}]}]}' rows={8} value={lootCenter.patch} onChange={e => setLootCenter({ ...lootCenter, patch: e.target.value })} style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #313244', background: '#11111b', color: '#cdd6f4', resize: 'vertical', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                    </div>
+
+                    <button style={{ marginTop: '6px', padding: '14px', borderRadius: 8, border: 'none', background: '#8bdc8a', fontWeight: 'bold', cursor: 'pointer' }} onClick={async () => {
+                      try {
+                        const packPath = packInfo?.path || localStorage.getItem('lastModpackPath');
+                        const patchObj = JSON.parse(lootCenter.patch || '{}');
+                        const res = await window.electronAPI.lootEditorApply(packPath, lootCenter.lootPath, patchObj);
+                        alert(res?.message || 'Loot aplicado');
+                      } catch (err) {
+                        alert('JSON patch inválido. Asegúrate de que tenga una sintaxis JSON correcta.');
+                      }
+                    }}>⚡ Aplicar Loot Patch</button>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

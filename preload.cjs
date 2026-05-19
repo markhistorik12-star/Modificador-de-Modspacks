@@ -34,4 +34,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
 
   listFolderContent: (folderPath, packPath) => ipcRenderer.invoke('list-folder-content', folderPath, packPath),
+  exploreJarContents: (jarName, packPath) => ipcRenderer.invoke('explore-jar-contents', jarName, packPath),
+  readJarFile: (jarName, internalPath, packPath) => ipcRenderer.invoke('read-jar-file', jarName, internalPath, packPath),
+  injectSpawnControl: (tweakData, packPath) => ipcRenderer.invoke('inject-spawn-control', tweakData, packPath),
+  lootEditorApply: (packPath, lootPath, patch) => ipcRenderer.invoke('loot-editor-apply', packPath, lootPath, patch),
+  scanModIds: (modsPath) => ipcRenderer.invoke('scan-mod-ids', modsPath),
+  injectItemTweak: (tweakData, packPath) => ipcRenderer.invoke('inject-item-tweak', tweakData, packPath),
+  injectEntityTweak: (tweakData, packPath) => ipcRenderer.invoke('inject-entity-tweak', tweakData, packPath),
+
 });

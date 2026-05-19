@@ -333,7 +333,7 @@ app.whenReady().then(() => {
       if (category) facetsArray.push([`categories:${category}`]);
       
       // Balanceamos: Pedimos 50 resultados exactos
-      const modrinthUrl = `https://api.modrinth.com/v2/search?query=${query}&facets=${encodeURIComponent(JSON.stringify(facetsArray))}&index=${sortBy}&limit=50`;
+      const modrinthUrl = `https://api.modrinth.com/v2/search?query=${query}&facets=${encodeURIComponent(JSON.stringify(facetsArray))}&index=${sortBy}&limit=200`;
       const modrinthRes = await fetch(modrinthUrl);
       const modrinthData = await modrinthRes.json();
 
@@ -348,6 +348,7 @@ app.whenReady().then(() => {
       }));
 
       // --- 2. CURSEFORGE ---
+      // --- 2. CURSEFORGE (BÚSQUEDA) ---
       let curseResults = [];
       try {
         const cfSort = sortBy === 'downloads' ? 4 : (sortBy === 'newest' ? 2 : 1);
@@ -446,15 +447,29 @@ app.whenReady().then(() => {
         downloadUrl = versionObj.downloadUrl;
         
         if (!downloadUrl) {
-          // ✨ USAMOS LA LLAVE GLOBAL AQUÍ ✨
+          // USAMOS LA LLAVE GLOBAL AQUÍ 
           const res = await fetch(`https://api.curseforge.com/v1/mods/${versionObj.projectId}/files/${versionObj.id}/download-url`, {
             headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' }
           });
+          
           if (res.ok) {
               const data = await res.json();
+              // Validamos por si CurseForge da OK pero envía el enlace vacío
+              if (!data.data) {
+                  return { 
+                      success: false, 
+                      errorCode: 'RESTRICTED_BY_AUTHOR',
+                      message: "El autor de este mod en CurseForge no permite descargas desde apps externas. Debes bajarlo de la web." 
+                  };
+              }
               downloadUrl = data.data;
           } else {
-              throw new Error("El autor de este mod en CurseForge no permite descargas desde apps externas. Debes bajarlo de la web.");
+              // Validamos si CurseForge rechaza la conexión (ej. Error 403 Forbidden)
+              return { 
+                  success: false, 
+                  errorCode: 'RESTRICTED_BY_AUTHOR',
+                  message: "El autor de este mod en CurseForge no permite descargas desde apps externas. Debes bajarlo de la web." 
+              };
           }
         }
         fileName = versionObj.name.endsWith('.jar') ? versionObj.name : `${versionObj.name}.jar`;
@@ -478,7 +493,7 @@ app.whenReady().then(() => {
       console.error(err);
       return { success: false, message: err.message };
     }
-  });
+});
 
   ipcMain.handle('diagnose-modpack', async (event, packPath) => {
     try {
@@ -691,7 +706,192 @@ app.whenReady().then(() => {
     }
   });
 
-  
+  // --- NUEVO: Escanear el interior de un mod (.jar) ---
+  ipcMain.handle('explore-jar-contents', async (event, jarName, packPath) => {
+    try {
+      const jarPath = path.join(packPath, 'mods', jarName);
+      const zip = new AdmZip(jarPath);
+      const zipEntries = zip.getEntries();
+
+      const internalFiles = [];
+
+      zipEntries.forEach(entry => {
+        if (entry.isDirectory) return;
+
+        const pathInsideJar = entry.entryName;
+        
+        // 🎯 Nuestro filtro: Solo buscamos JSONs de datos y configuraciones por defecto
+        if (
+          (pathInsideJar.startsWith('data/') && pathInsideJar.endsWith('.json')) ||
+          pathInsideJar.startsWith('defaultconfigs/')
+        ) {
+          internalFiles.push(pathInsideJar);
+        }
+      });
+
+      // Ordenamos alfabéticamente para que la lista se vea profesional
+      internalFiles.sort();
+
+      return { success: true, files: internalFiles };
+    } catch (err) {
+      return { success: false, message: `Error al abrir el mod: ${err.message}` };
+    }
+  });
+
+  //Leer un archivo específico desde adentro del .jar ---
+  ipcMain.handle('read-jar-file', async (event, jarName, internalPath, packPath) => {
+    try {
+      const jarPath = path.join(packPath, 'mods', jarName);
+      const zip = new AdmZip(jarPath);
+      
+      const entry = zip.getEntry(internalPath);
+      if (!entry) {
+        return { success: false, message: `El archivo ${internalPath} desapareció o no se puede leer.` };
+      }
+
+      // Leemos el texto puro desde el interior del ZIP
+      const content = zip.readAsText(entry);
+      return { success: true, content: content };
+    } catch (err) {
+      return { success: false, message: `Fallo de I/O interno: ${err.message}` };
+    }
+  });
+
+
+ 
+  // Spawn control (pronto)
+  ipcMain.handle('inject-spawn-control', async (event, tweakData, packPath) => {
+    try {
+      const kubejsPath = path.join(packPath, 'kubejs', 'server_scripts');
+      await fs.mkdir(kubejsPath, { recursive: true });
+      const scriptPath = path.join(kubejsPath, '3_spawn_tweaks.js');
+      if (!tweakData || !tweakData.entityId) return { success: false, message: 'No entityId provided' };
+      let lines = [];
+      if (tweakData.health) {
+        lines.push(`    event.entity.setAttributeBaseValue('minecraft:generic.max_health', ${tweakData.health});`);
+        lines.push(`    event.entity.setHealth(${tweakData.health});`);
+      }
+      if (tweakData.speed) lines.push(`    event.entity.setAttributeBaseValue('minecraft:generic.movement_speed', ${tweakData.speed});`);
+      if (tweakData.damage) lines.push(`    event.entity.setAttributeBaseValue('minecraft:generic.attack_damage', ${tweakData.damage});`);
+      if (lines.length === 0) return { success:false, message:'No tweak data provided' };
+
+      const rule = `EntityEvents.spawned(event => {\n  if (event.entity.type === '${tweakData.entityId}') {\n${lines.map(l => '    '+l).join('\n')}\n  }\n});\n`;
+      await fs.appendFile(scriptPath, rule, 'utf-8');
+      return { success: true, message: `Spawn control applied for ${tweakData.entityId}` };
+    } catch (err) {
+      return { success: false, message: `Spawn control error: ${err.message}` };
+    }
+  });
+
+  // Loot editor (pronto)
+  ipcMain.handle('loot-editor-apply', async (event, packPath, lootPath, patch) => {
+    try {
+      const targetPath = path.join(packPath, lootPath);
+      let base = {};
+      try {
+        const raw = await fs.readFile(targetPath, 'utf-8');
+        base = JSON.parse(raw);
+      } catch {
+        base = {};
+      }
+      const merge = (dst, src) => {
+        for (const k of Object.keys(src)) {
+          if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k])) {
+            dst[k] = dst[k] || {};
+            merge(dst[k], src[k]);
+          } else {
+            dst[k] = src[k];
+          }
+        }
+      };
+      merge(base, patch || {});
+      await fs.writeFile(targetPath, JSON.stringify(base, null, 2), 'utf-8');
+      return { success: true, message: `Loot edited: ${lootPath}` };
+    } catch (err) {
+      return { success: false, message: `Loot editor error: ${err.message}` };
+    }
+  });
+
+  // --- INYECCIÓN DE BALANCE DE ÍTEMS ---
+  ipcMain.handle('inject-item-tweak', async (event, tweakData, packPath) => {
+    try {
+      // CORRECCIÓN: Los items se modifican en el startup, antes de que cargue el mundo
+      const kubejsPath = path.join(packPath, 'kubejs', 'startup_scripts');
+      await fs.mkdir(kubejsPath, { recursive: true });
+      const scriptPath = path.join(kubejsPath, '1_item_tweaks.js');
+
+      let script = `\nItemEvents.modification(event => {\n  event.modify('${tweakData.itemId}', item => {\n`;
+      if (tweakData.damage) script += `    item.attackDamage = ${tweakData.damage};\n`;
+      if (tweakData.armor) script += `    item.armorProtection = ${tweakData.armor};\n`;
+      if (tweakData.toughness) script += `    item.armorToughness = ${tweakData.toughness};\n`;
+      script += `  });\n});\n`;
+
+      await fs.appendFile(scriptPath, script, 'utf-8');
+      return { success: true, message: `✅ Balance inyectado exitosamente a: ${tweakData.itemId} (Startup Script)` };
+    } catch (err) {
+      return { success: false, message: `❌ Error al inyectar código: ${err.message}` };
+    }
+  });
+
+  ipcMain.handle('inject-entity-tweak', async (event, tweakData, packPath) => {
+    try {
+      const kubejsPath = path.join(packPath, 'kubejs', 'server_scripts');
+      await fs.mkdir(kubejsPath, { recursive: true });
+      const scriptPath = path.join(kubejsPath, '2_entity_tweaks.js');
+
+      let script = `\nEntityEvents.spawned(event => {\n  if (event.entity.type === '${tweakData.entityId}') {\n`;
+      if (tweakData.health) {
+        script += `    event.entity.setAttributeBaseValue('minecraft:generic.max_health', ${tweakData.health});\n`;
+        script += `    event.entity.setHealth(${tweakData.health});\n`;
+      }
+      if (tweakData.damage) script += `    event.entity.setAttributeBaseValue('minecraft:generic.attack_damage', ${tweakData.damage});\n`;
+      if (tweakData.speed) script += `    event.entity.setAttributeBaseValue('minecraft:generic.movement_speed', ${tweakData.speed});\n`;
+      script += `  }\n});\n`;
+
+      await fs.appendFile(scriptPath, script, 'utf-8');
+      return { success: true, message: `✅ Mutación genética aplicada a: ${tweakData.entityId}` };
+    } catch (err) {
+      return { success: false, message: `❌ Error al inyectar código: ${err.message}` };
+    }
+  });
+
+
+// Esta función se ejecuta cuando React se lo pide
+ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
+      let extractedIds = new Set(); // Usamos Set para evitar duplicados automáticamente
+      
+      try {
+          const normalizedPath = path.normalize(modsPath);
+          const files = await fs.readdir(normalizedPath);
+
+          for (const file of files) {
+              if (file.endsWith('.jar')) {
+                  // Agregamos un try/catch interno. Si un .jar está corrupto, lo ignora y sigue con el resto.
+                  try {
+                      const jarPath = path.join(normalizedPath, file);
+                      const zip = new AdmZip(jarPath);
+                      const zipEntries = zip.getEntries();
+
+                      zipEntries.forEach(entry => {
+                          // 1. Extraer Armas, Armaduras e Ítems
+                          const itemMatch = entry.entryName.match(/^assets\/([a-z0-9_.-]+)\/models\/item\/([a-z0-9_.-]+)\.json$/);
+                          if (itemMatch) extractedIds.add(`${itemMatch[1]}:${itemMatch[2]}`);
+
+                          // 2. Extraer Entidades, Mobs y Jefes
+                          const entityMatch = entry.entryName.match(/^data\/([a-z0-9_.-]+)\/loot_tables\/entities\/([a-z0-9_.-]+)\.json$/);
+                          if (entityMatch) extractedIds.add(`${entityMatch[1]}:${entityMatch[2]}`);
+                      });
+                  } catch (jarError) {
+                      // Ignoramos silenciosamente archivos que no sean ZIP válidos
+                  }
+              }
+          }
+          return [...extractedIds].sort();
+      } catch (error) {
+          console.error("Error al leer la carpeta mods:", error);
+          return [];
+      }
+  });
 
 app.on('window-all-closed', () => { 
   if (process.platform !== 'darwin') app.quit(); 
