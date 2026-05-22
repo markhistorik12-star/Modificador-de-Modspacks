@@ -1,4 +1,3 @@
-// src/components/nodes/ModNode.jsx
 import { Handle, Position } from 'reactflow';
 import { Box } from 'lucide-react';
 

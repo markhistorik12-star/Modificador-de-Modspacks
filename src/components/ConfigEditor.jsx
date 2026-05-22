@@ -95,7 +95,7 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
         {/* Footer (Guardar) */}
         <div style={{ padding: '15px 20px', borderTop: '1px solid #313244', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
 
-          {/* --- NUEVO BOTÓN PARA VS CODE --- */}
+          {/* --- Abrir en editor externo --- */}
           <button
             onClick={onOpenExternal}
             style={{

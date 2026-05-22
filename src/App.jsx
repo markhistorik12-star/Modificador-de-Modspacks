@@ -7,6 +7,7 @@ import ConfigEditor from './components/ConfigEditor';
 
 const nodeTypes = { mod: ModNode, group: GroupNode };
 
+// --- SECCIÓN: AutocompleteInput ---
 const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorClass }) => {
   const [showDropdown, setShowDropdown] = useState(false);
   const suggestions = value.length > 2
@@ -27,7 +28,7 @@ const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorCl
           {suggestions.map((s, i) => (
             <li 
               key={i} 
-              // CORRECCIÓN AQUÍ: onMouseDown en lugar de onClick, y prevemos que el input pierda el foco
+              // onMouseDown evita que el input pierda el foco
               onMouseDown={(e) => { e.preventDefault(); onChange(s); setShowDropdown(false); }} 
               style={{ padding: '10px 15px', cursor: 'pointer', color: '#cdd6f4', borderBottom: '1px solid #313244', fontSize: '13px' }} 
               onMouseEnter={e => e.target.style.background = '#313244'} 
@@ -108,7 +109,7 @@ export default function App() {
   const [spawnCenter, setSpawnCenter] = useState({ entityId: 'minecraft:zombie', health: 20, speed: 0.2, damage: 5 });
   const [lootCenter, setLootCenter] = useState({ lootPath: 'data/minecraft/loot_tables/entities/zombie.json', patch: '{"sample":1}' });
 
-  // UI hooks antiguos (mantenidos por compatibilidad pero ya no se usan como modales)
+  // Hooks legacy (en desuso)
   const [spawnModalOpen, setSpawnModalOpen] = useState(false);
   const [spawnForm, setSpawnForm] = useState({ entityId: '', health: '', speed: '', damage: '' });
   const [lootModalOpen, setLootModalOpen] = useState(false);
@@ -283,12 +284,13 @@ export default function App() {
     setEdges(newEdges);
   };
 
+  // --- SECCIÓN: Escaneo de carpeta ---
   const handleScanFolder = async () => {
     if (window.electronAPI) {
       const result = await window.electronAPI.scanMods();
       if (result && result.info) {
         processScanResult(result);
-        // Limpiamos la ruta para asegurar que termine en /mods sin duplicarse
+        // Normalizar ruta de mods
         const cleanPath = result.info.path.replace(/[\\\/]mods[\\\/]?$/, '');
         const modPath = cleanPath + '/mods';
         const ids = await window.electronAPI.scanModIds(modPath);
@@ -361,6 +363,7 @@ export default function App() {
     setDownloadingMods(prev => ({ ...prev, [projectId]: false }));
   };
 
+  // --- SECCIÓN: Descarga de mod ---
   const handleConfirmDownload = async (version) => {
     if (!window.electronAPI || !packInfo || !versionSelectorModal) return;
 
@@ -535,6 +538,7 @@ export default function App() {
     }
   };
 
+  // --- SECCIÓN: Exportación de modpack ---
   const handleExportModpack = async () => {
     if (!window.electronAPI || !packInfo) return;
 

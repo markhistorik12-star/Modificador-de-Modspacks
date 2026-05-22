@@ -8,15 +8,16 @@ import { exec } from 'child_process';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
-// 1. Cargamos el .env desde la raíz de modpack_asist (Esto ya funciona)
+// Cargar variables de entorno desde .env
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
-// 2. Asignamos la constante
+
 const CF_API_KEY = process.env.CURSEFORGE_API_KEY;
 
-// 5. Recreamos __filename y __dirname para tus otras funciones
+// Obtener rutas base del proyecto
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// --- SECCIÓN: Escaneo de modpack ---
 async function handleFolderOpen(event, knownPath) { 
   let rootPath = knownPath;
 
@@ -151,6 +152,7 @@ async function handleFolderOpen(event, knownPath) {
   }
 }
 
+// --- SECCIÓN: Ventana principal ---
 function createWindow() {
   const win = new BrowserWindow({
     width: 1400, height: 850, title: "Modpack Assist", autoHideMenuBar: true,
@@ -162,6 +164,7 @@ function createWindow() {
   win.loadURL('http://localhost:5173');
 }
 
+// --- SECCIÓN: Handlers IPC ---
 app.whenReady().then(() => {
   createWindow(); 
   
@@ -180,19 +183,17 @@ app.whenReady().then(() => {
     try {
       const targetPath = path.join(packPath, filePath);
       
-      // 1. Revisamos qué tipo de elemento es antes de intentar leerlo
+      // Verificar si es carpeta antes de leer
       const stats = await fs.stat(targetPath);
       
       if (stats.isDirectory()) {
         return { success: false, message: `⛔ '${filePath}' es una CARPETA. El editor solo puede abrir archivos.` };
       }
 
-      // 2. Si es un archivo, lo leemos
       const content = await fs.readFile(targetPath, 'utf-8');
       return { success: true, content: content };
       
     } catch (err) {
-      // 3. Si falla, devolvemos el error nativo exacto
       return { success: false, message: `Error Nativo: ${err.message}` };
     }
   });
@@ -330,14 +331,14 @@ app.whenReady().then(() => {
     
     try {
       // --- 1. MODRINTH ---
-      // 🎯 Añadimos el filtro estricto de versión al array de facetas
+      // Filtrar por loader y versión de MC
       let facetsArray = [
         [`categories:${safeLoader}`],
         [`versions:${gameVersion}`] 
       ];
       if (category) facetsArray.push([`categories:${category}`]);
       
-      // Balanceamos: Pedimos 50 resultados exactos
+
       const modrinthUrl = `https://api.modrinth.com/v2/search?query=${query}&facets=${encodeURIComponent(JSON.stringify(facetsArray))}&index=${sortBy}&limit=200`;
       const modrinthRes = await fetch(modrinthUrl);
       const modrinthData = await modrinthRes.json();
@@ -357,7 +358,7 @@ app.whenReady().then(() => {
       try {
         const cfSort = sortBy === 'downloads' ? 4 : (sortBy === 'newest' ? 2 : 1);
         
-        // 🎯 Añadimos &gameVersion=${gameVersion} y subimos el pageSize a 50
+
         const cfUrl = `https://api.curseforge.com/v1/mods/search?gameId=432&classId=6&searchFilter=${query}&modLoaderType=${modloaderId}&gameVersion=${gameVersion}&sortField=${cfSort}&sortOrder=desc&pageSize=50`;
         
         const cfRes = await fetch(cfUrl, {
@@ -403,7 +404,7 @@ app.whenReady().then(() => {
         const modloaderId = safeLoader === 'forge' ? 1 : (safeLoader === 'fabric' ? 4 : 5);
         const cfUrl = `https://api.curseforge.com/v1/mods/${projectId}/files?gameVersion=${gameVersion}&modLoaderType=${modloaderId}`;
         
-        // ✨ USAMOS LA LLAVE GLOBAL AQUÍ ✨
+
         const res = await fetch(cfUrl, { headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' } });
         
         if (!res.ok) throw new Error("Fallo de conexión con CurseForge API.");
@@ -442,6 +443,7 @@ app.whenReady().then(() => {
     } catch (err) { return { success: false, message: err.message }; }
   });
 
+  // --- SECCIÓN: Descarga de mods ---
   ipcMain.handle('download-mod', async (event, versionObj, packPath) => {
     try {
       let downloadUrl = '';
@@ -451,14 +453,14 @@ app.whenReady().then(() => {
         downloadUrl = versionObj.downloadUrl;
         
         if (!downloadUrl) {
-          // USAMOS LA LLAVE GLOBAL AQUÍ 
+
           const res = await fetch(`https://api.curseforge.com/v1/mods/${versionObj.projectId}/files/${versionObj.id}/download-url`, {
             headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' }
           });
           
           if (res.ok) {
               const data = await res.json();
-              // Validamos por si CurseForge da OK pero envía el enlace vacío
+
               if (!data.data) {
                   return { 
                       success: false, 
@@ -468,7 +470,7 @@ app.whenReady().then(() => {
               }
               downloadUrl = data.data;
           } else {
-              // Validamos si CurseForge rechaza la conexión (ej. Error 403 Forbidden)
+
               return { 
                   success: false, 
                   errorCode: 'RESTRICTED_BY_AUTHOR',
@@ -499,6 +501,7 @@ app.whenReady().then(() => {
     }
 });
 
+  // --- SECCIÓN: Diagnóstico ---
   ipcMain.handle('diagnose-modpack', async (event, packPath) => {
     try {
       const modsPath = path.join(packPath, 'mods');
@@ -588,6 +591,7 @@ app.whenReady().then(() => {
     }
   });
 
+  // --- SECCIÓN: Exportación ---
   ipcMain.handle('export-modpack', async (event, packPath, packName) => {
     try {
       const zip = new AdmZip();
@@ -605,7 +609,7 @@ app.whenReady().then(() => {
   
   ipcMain.handle('read-toml', async (event, filePath) => {
     try {
-      // Ya tienes 'fs' y 'toml' importados en la línea 4 y 6 de tu archivo
+
       const rawContent = await fs.readFile(filePath, 'utf-8');
       const parsedData = toml.parse(rawContent);
       
@@ -666,7 +670,7 @@ app.whenReady().then(() => {
     return { success: true, logs };
   });
 
-  // Abrir archivo en editor externo ---
+  // --- SECCIÓN: Editor externo ---
   ipcMain.handle('open-external-editor', async (event, filePath, packPath) => {
     try {
       const exactPath = path.join(packPath, filePath);
@@ -703,14 +707,14 @@ app.whenReady().then(() => {
       const fullPath = path.join(packPath, folderPath);
       const files = await fs.readdir(fullPath);
       
-      // Opcional: Podrías filtrar para que no muestre carpetas dentro de carpetas si quieres
+
       return { success: true, files };
     } catch (err) {
       return { success: false, message: err.message };
     }
   });
 
-  // --- NUEVO: Escanear el interior de un mod (.jar) ---
+  // --- Escanear interior de un mod (.jar) ---
   ipcMain.handle('explore-jar-contents', async (event, jarName, packPath) => {
     try {
       const jarPath = path.join(packPath, 'mods', jarName);
@@ -723,8 +727,6 @@ app.whenReady().then(() => {
         if (entry.isDirectory) return;
 
         const pathInsideJar = entry.entryName;
-        
-        // 🎯 Nuestro filtro: Solo buscamos JSONs de datos y configuraciones por defecto
         if (
           (pathInsideJar.startsWith('data/') && pathInsideJar.endsWith('.json')) ||
           pathInsideJar.startsWith('defaultconfigs/')
@@ -733,7 +735,6 @@ app.whenReady().then(() => {
         }
       });
 
-      // Ordenamos alfabéticamente para que la lista se vea profesional
       internalFiles.sort();
 
       return { success: true, files: internalFiles };
@@ -753,7 +754,6 @@ app.whenReady().then(() => {
         return { success: false, message: `El archivo ${internalPath} desapareció o no se puede leer.` };
       }
 
-      // Leemos el texto puro desde el interior del ZIP
       const content = zip.readAsText(entry);
       return { success: true, content: content };
     } catch (err) {
@@ -763,7 +763,7 @@ app.whenReady().then(() => {
 
 
  
-  // Spawn control (pronto)
+  // Spawn control
   ipcMain.handle('inject-spawn-control', async (event, tweakData, packPath) => {
     try {
       const kubejsPath = path.join(packPath, 'kubejs', 'server_scripts');
@@ -787,7 +787,7 @@ app.whenReady().then(() => {
     }
   });
 
-  // Loot editor (pronto)
+  // Loot editor
   ipcMain.handle('loot-editor-apply', async (event, packPath, lootPath, patch) => {
     try {
       const targetPath = path.join(packPath, lootPath);
@@ -860,7 +860,7 @@ app.whenReady().then(() => {
   });
 
 
-// Esta función se ejecuta cuando React se lo pide
+// --- SECCIÓN: Escaneo de IDs de mods ---
 ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
       let extractedIds = new Set(); // Usamos Set para evitar duplicados automáticamente
       

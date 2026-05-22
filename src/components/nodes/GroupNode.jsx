@@ -1,4 +1,3 @@
-// components/nodes/GroupNode.jsx
 import { memo } from 'react';
 import { NodeResizer } from 'reactflow';
 

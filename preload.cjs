@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   scanMods: (knownPath) => ipcRenderer.invoke('dialog:openFolder', knownPath),
   createProject: (projectData) => ipcRenderer.invoke('create-project', projectData),
   
-  // 2. Buscador y Tienda (¡Aquí está el que te daba error!)
+  // 2. Buscador y Tienda
   getGameVersions: () => ipcRenderer.invoke('get-game-versions'),
   searchModsOnline: (query, gameVersion, loader, sortBy, category) => ipcRenderer.invoke('search-mods-online', query, gameVersion, loader, sortBy, category),
   getModVersions: (projectId, gameVersion, loader, source) => ipcRenderer.invoke('get-mod-versions', projectId, gameVersion, loader, source),
@@ -28,9 +28,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   appendFile: (filePath, packPath, newText) => ipcRenderer.invoke('append-file', filePath, packPath, newText),
   writeFile: (filePath, packPath, content) => ipcRenderer.invoke('write-file', filePath, packPath, content),
 
-  // Bot removed: IA autónoma handler removed
+
   readToml: (filePath) => ipcRenderer.invoke('read-toml', filePath),
-  // Agrega esto junto a tus otras funciones en preload.cjs
+
   openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
 
   listFolderContent: (folderPath, packPath) => ipcRenderer.invoke('list-folder-content', folderPath, packPath),
