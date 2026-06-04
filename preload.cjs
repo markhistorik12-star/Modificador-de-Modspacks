@@ -1,38 +1,19 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // 1. Escaneo y Creación
   scanMods: (knownPath) => ipcRenderer.invoke('dialog:openFolder', knownPath),
   createProject: (projectData) => ipcRenderer.invoke('create-project', projectData),
-  
-  // 2. Buscador y Tienda
   getGameVersions: () => ipcRenderer.invoke('get-game-versions'),
   searchModsOnline: (query, gameVersion, loader, sortBy, category) => ipcRenderer.invoke('search-mods-online', query, gameVersion, loader, sortBy, category),
   getModVersions: (projectId, gameVersion, loader, source) => ipcRenderer.invoke('get-mod-versions', projectId, gameVersion, loader, source),
-  
-  // 3. Descargas
   downloadMod: (versionObj, packPath) => ipcRenderer.invoke('download-mod', versionObj, packPath),
   installModRecursively: (versionId, gameVersion, loader, packPath) => ipcRenderer.invoke('install-mod-recursively', versionId, gameVersion, loader, packPath),
-  
-  // 4. Utilidades del Modpack
   diagnoseModpack: (packPath) => ipcRenderer.invoke('diagnose-modpack', packPath),
   exportModpack: (packPath, packName) => ipcRenderer.invoke('export-modpack', packPath, packName),
-  
-  // 5. Manejo de Archivos Físicos (Eliminar, Leer, Editar)
   deleteFile: (filePath, packPath) => ipcRenderer.invoke('delete-file', filePath, packPath),
-  readFile: (filePath, packPath) => ipcRenderer.invoke('read-file', filePath, packPath),
   readFullFile: (filePath, packPath) => ipcRenderer.invoke('read-full-file', filePath, packPath),
-  searchConfigs: (searchTerm, packPath) => ipcRenderer.invoke('search-configs', searchTerm, packPath),
-  editFile: (filePath, packPath, oldText, newText) => ipcRenderer.invoke('edit-file', filePath, packPath, oldText, newText),
-  prependFile: (filePath, packPath, newText) => ipcRenderer.invoke('prepend-file', filePath, packPath, newText),
-  appendFile: (filePath, packPath, newText) => ipcRenderer.invoke('append-file', filePath, packPath, newText),
   writeFile: (filePath, packPath, content) => ipcRenderer.invoke('write-file', filePath, packPath, content),
-
-
-  readToml: (filePath) => ipcRenderer.invoke('read-toml', filePath),
-
   openExternalEditor: (filePath, packPath) => ipcRenderer.invoke('open-external-editor', filePath, packPath),
-
   listFolderContent: (folderPath, packPath) => ipcRenderer.invoke('list-folder-content', folderPath, packPath),
   exploreJarContents: (jarName, packPath) => ipcRenderer.invoke('explore-jar-contents', jarName, packPath),
   readJarFile: (jarName, internalPath, packPath) => ipcRenderer.invoke('read-jar-file', jarName, internalPath, packPath),
@@ -40,6 +21,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   lootEditorApply: (packPath, lootPath, patch) => ipcRenderer.invoke('loot-editor-apply', packPath, lootPath, patch),
   scanModIds: (modsPath) => ipcRenderer.invoke('scan-mod-ids', modsPath),
   injectItemTweak: (tweakData, packPath) => ipcRenderer.invoke('inject-item-tweak', tweakData, packPath),
+  optimizationStart: (packPath, categories) => ipcRenderer.invoke('optimization:start', packPath, categories),
+  optimizationRollback: (packPath) => ipcRenderer.invoke('optimization:rollback', packPath),
+  optimizationCheckStatus: (packPath) => ipcRenderer.invoke('optimization:check-status', packPath),
   injectEntityTweak: (tweakData, packPath) => ipcRenderer.invoke('inject-entity-tweak', tweakData, packPath),
-
+  getScriptsTree: (packPath) => ipcRenderer.invoke('scripts:get-tree', packPath),
+  readScript: (filePath, packPath) => ipcRenderer.invoke('scripts:read', filePath, packPath),
+  saveScript: (filePath, content, packPath) => ipcRenderer.invoke('scripts:save', filePath, content, packPath),
+  getSystemSpecs: () => ipcRenderer.invoke('get-system-specs'),
+  calculateAllImpacts: (packPath) => ipcRenderer.invoke('calculate-all-impacts', packPath),
 });

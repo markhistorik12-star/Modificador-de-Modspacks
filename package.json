@@ -33,6 +33,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@iarna/toml": "^2.2.5",
+    "@monaco-editor/react": "^4.7.0",
     "adm-zip": "^0.5.17",
     "axios": "^1.14.0",
     "dotenv": "^17.4.2",
@@ -43,6 +44,7 @@
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
-    "reactflow": "^11.11.4"
+    "reactflow": "^11.11.4",
+    "systeminformation": "^5.31.6"
   }
 }

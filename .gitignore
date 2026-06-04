@@ -25,3 +25,4 @@ dist-ssr
 .env
 modpack_asist/mods.txt
 modpack_asist/mejoras.txt
+modpack_asist/descripcion.txt
