@@ -6,17 +6,17 @@ export default memo(({ data, selected }) => {
     <>
       {/* Herramienta para que el usuario pueda redimensionar el grupo manualmente si lo desea */}
       <NodeResizer 
-        color="#cba6f7" 
+        color="#00e5ff" 
         isVisible={selected} 
         minWidth={300} 
         minHeight={150} 
       />
       <div style={{
         padding: '10px 15px',
-        borderBottom: '2px solid #313244',
-        background: '#11111b',
+        borderBottom: '2px solid #2a2e36',
+        background: '#0d0f12',
         borderRadius: '8px 8px 0 0',
-        color: '#a6e3a1',
+        color: '#00e67a',
         fontWeight: 'bold',
         fontSize: '14px',
         fontFamily: 'sans-serif',
@@ -28,11 +28,11 @@ export default memo(({ data, selected }) => {
         left: 0,
         right: 0
       }}>
-        📦 Grupo: {data.label}
+        Grupo: {data.label}
       </div>
       <div style={{
-        border: '3px solid #313244',
-        background: 'rgba(24, 24, 37, 0.4)',
+        border: '3px solid #2a2e36',
+        background: 'rgba(26, 29, 36, 0.4)',
         borderRadius: '8px',
         width: '100%',
         height: '100%',

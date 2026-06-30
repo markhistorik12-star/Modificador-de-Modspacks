@@ -1,0 +1,115 @@
+{
+  "id": "heavy-modpack",
+  "name": "Heavy Modpack Optimizations",
+  "description": "Aggressive optimizations for large modpacks (300+ mods)",
+  "author": "Modpack Assist",
+  "version": "1.0.0",
+  "tags": ["heavy", "aggressive", "large-modpacks"],
+  "categories": {
+    "gpu_vram": {
+      "sodium-options.json": {
+        "quality.graphics_quality": "FAST",
+        "quality.smooth_lighting": "OFF",
+        "performance.fog": "FAST",
+        "quality.mipmap_levels": 0,
+        "quality.biome_blend_radius": 0,
+        "performance.shadows": false
+      },
+      "embeddium-options.json": {
+        "quality.graphics_quality": "FAST",
+        "quality.smooth_lighting": "OFF",
+        "performance.fog": "FAST"
+      },
+      "rubidium-options.json": {
+        "quality.graphics_quality": "FAST",
+        "quality.smooth_lighting": "OFF",
+        "performance.fog": "FAST"
+      },
+      "oculus.properties": {
+        "shaderPack": "",
+        "internalShaders": false,
+        "fog": false,
+        "renderDistanceMultiplier": 0.75
+      },
+      "iris.properties": {
+        "shaderPack": "",
+        "internalShaders": false,
+        "fog": false
+      }
+    },
+    "cpu_maps": {
+      "xaerominimap.toml": {
+        "enable_update_chunks": false,
+        "update_frequency": 0,
+        "enable_entity_icons": false,
+        "max_entities": 16
+      },
+      "xaeroworldmap.toml": {
+        "enable_cave_mapping": false,
+        "max_zoom_level": 1
+      },
+      "journeymap.core.config": {
+        "renderDistance": 1,
+        "surfaceMapping": false,
+        "caveMapping": false
+      }
+    },
+    "cpu_entities": {
+      "entityculling.toml": {
+        "cull_blocks": true,
+        "cull_entities": true,
+        "cull_distance": 48
+      },
+      "ferritecore.toml": {
+        "reducedDebugInfo": true,
+        "memoryPoolSize": 512
+      }
+    },
+    "engine_system": {
+      "modernfix.toml": {
+        "crashReports.simplify": true,
+        "models.bakeEarly": true,
+        "resources.parallelLoad": true
+      },
+      "immediatelyfast.toml": {
+        "models.bakeEarly": true,
+        "render.fastBlockModels": true
+      },
+      "particleculling.properties": {
+        "cull_particles": true,
+        "max_particles": 100
+      },
+      "connectivity.properties": {
+        "timeout": 5000,
+        "retry_attempts": 1
+      },
+      "farsight.toml": {
+        "fake_chunks": false,
+        "max_chunks": 128
+      },
+      "forge-client.toml": {
+        "alwaysSetupTerrainOffThread": true,
+        "fastTreeLeafDecay": true
+      }
+    },
+    "memory": {
+      "modernfix.toml": {
+        "memory.gcInterval": 60000,
+        "memory.lowMemoryAction": "gc"
+      },
+      "smoothboot.toml": {
+        "rampUpTime": 60000,
+        "initialThreads": 1,
+        "maxThreads": 2
+      }
+    }
+  },
+  "filePatterns": {
+    "gpu_vram": ["*sodium*.json", "*embeddium*.json", "*rubidium*.json", "*oculus*.properties", "*iris*.properties"],
+    "cpu_maps": ["*xaero*minimap*.toml", "*xaero*worldmap*.toml", "*journeymap*.toml"],
+    "cpu_entities": ["*entityculling*.toml", "*ferritecore*.toml"],
+    "engine_system": ["*modernfix*.toml", "*immediatelyfast*.toml", "*particleculling*.properties", "*connectivity*.properties", "*farsight*.toml", "*forge-client*.toml"],
+    "memory": ["*modernfix*.toml", "*smoothboot*.toml"]
+  },
+  "mergeStrategy": "merge"
+}

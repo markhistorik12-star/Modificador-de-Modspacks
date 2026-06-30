@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
-modpack_asist/mods.txt
-modpack_asist/mejoras.txt
-modpack_asist/descripcion.txt
+release/
+mods.txt
+mejoras.txt
+descripcion.txt

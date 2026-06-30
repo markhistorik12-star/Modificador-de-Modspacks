@@ -1,0 +1,14 @@
+appId: com.modpack.assist
+productName: Modpack Assist
+directories:
+  output: release
+files:
+  - "**/*"
+  - "!{.env,.env.*}"
+win:
+  target:
+    - target: dir
+      arch: x64
+  artifactName: "${productName}-${version}-win-unpacked"
+asar: false
+npmRebuild: true

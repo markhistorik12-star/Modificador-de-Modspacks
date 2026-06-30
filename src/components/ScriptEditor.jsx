@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
+import { useToast } from './Toast.jsx';
+import ToastContainer from './Toast.jsx';
 
 export default function ScriptEditor({ packPath }) {
-  // Estados para manejar los datos
+  const { toasts, showToast, removeToast } = useToast();
   const [fileTree, setFileTree] = useState({ kubejs: [], scripts: [] });
   const [activeFile, setActiveFile] = useState(null);
   const [code, setCode] = useState('// Selecciona un script del panel izquierdo para comenzar a editar');
@@ -30,7 +32,7 @@ export default function ScriptEditor({ packPath }) {
       setCode(response.data);
       setActiveFile(filePath);
     } else {
-      alert("No se pudo leer el archivo");
+      showToast("Error", "No se pudo leer el archivo", "error");
     }
   };
 
@@ -44,7 +46,7 @@ export default function ScriptEditor({ packPath }) {
       // Aquí puedes agregar un "toast" o notificación visual más bonita después
       console.log("¡Guardado exitoso!");
     } else {
-      alert("Error al guardar: " + response.message);
+      showToast("Error al guardar", response.message, "error");
     }
     
     setIsSaving(false);
@@ -55,8 +57,8 @@ export default function ScriptEditor({ packPath }) {
     return nodes.map((node, index) => (
       <div key={index} style={{ marginLeft: node.type === 'folder' ? '0px' : '15px' }}>
         {node.type === 'folder' ? (
-          <div style={{ fontWeight: 'bold', marginTop: '5px', color: '#e0e0e0' }}>
-            📁 {node.name}
+          <div style={{ fontWeight: 'bold', marginTop: '5px', color: '#f8f9fa' }}>
+            [DIR] {node.name}
             {/* Si es carpeta, renderizamos sus hijos recursivamente */}
             {node.children && renderTree(node.children)} 
           </div>
@@ -65,13 +67,12 @@ export default function ScriptEditor({ packPath }) {
             onClick={() => handleFileClick(node.path)}
             style={{ 
               cursor: 'pointer', 
-              padding: '4px',
-              color: activeFile === node.path ? '#61dafb' : '#abb2bf',
-              backgroundColor: activeFile === node.path ? '#2c313a' : 'transparent',
-              borderRadius: '4px'
-            }}
-          >
-            📄 {node.name}
+              padding: '4px 8px',
+              color: activeFile === node.path ? '#00e5ff' : '#9ca3af',
+              backgroundColor: activeFile === node.path ? '#262b33' : 'transparent',
+              borderRadius: '4px', transition: 'all 0.15s ease'
+            }} onMouseEnter={e => activeFile !== node.path && (e.target.style.backgroundColor = '#1a1d24')} onMouseLeave={e => activeFile !== node.path && (e.target.style.backgroundColor = 'transparent')}>
+            [FILE] {node.name}
           </div>
         )}
       </div>
@@ -79,14 +80,14 @@ export default function ScriptEditor({ packPath }) {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#1e1e1e', color: 'white' }}>
+    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#0d0f12', color: 'white' }}>
       
       {/* PANEL IZQUIERDO: Explorador de Archivos */}
-      <div style={{ width: '250px', borderRight: '1px solid #333', padding: '10px', overflowY: 'auto' }}>
-        <h3 style={{ fontSize: '14px', color: '#858585', textTransform: 'uppercase' }}>KubeJS Scripts</h3>
+      <div style={{ width: '250px', borderRight: '1px solid #2a2e36', padding: '10px', overflowY: 'auto' }}>
+        <h3 style={{ fontSize: '14px', color: '#9ca3af', textTransform: 'uppercase' }}>KubeJS Scripts</h3>
         {renderTree(fileTree.kubejs)}
 
-        <h3 style={{ fontSize: '14px', color: '#858585', textTransform: 'uppercase', marginTop: '20px' }}>CraftTweaker</h3>
+        <h3 style={{ fontSize: '14px', color: '#9ca3af', textTransform: 'uppercase', marginTop: '20px' }}>CraftTweaker</h3>
         {renderTree(fileTree.scripts)}
       </div>
 
@@ -94,16 +95,15 @@ export default function ScriptEditor({ packPath }) {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         
         {/* Barra superior del editor (Pestaña y botón guardar) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#252526', borderBottom: '1px solid #333' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', backgroundColor: '#1a1d24', borderBottom: '1px solid #2a2e36' }}>
           <span style={{ fontFamily: 'monospace' }}>
             {activeFile ? activeFile.split('\\').pop() : 'Sin archivo abierto'}
           </span>
           <button 
             onClick={handleSave} 
             disabled={!activeFile || isSaving}
-            style={{ backgroundColor: '#0e639c', color: 'white', border: 'none', padding: '5px 15px', borderRadius: '3px', cursor: activeFile ? 'pointer' : 'not-allowed' }}
-          >
-            {isSaving ? 'Guardando...' : '💾 Guardar Cambios'}
+            style={{ backgroundColor: '#00e5ff', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: activeFile ? 'pointer' : 'not-allowed', fontWeight: 'bold', transition: 'all 0.15s ease', boxShadow: activeFile && !isSaving ? '0 2px 8px rgba(0, 229, 255, 0.3)' : 'none' }} onMouseEnter={e => activeFile && !isSaving && (e.target.style.transform = 'translateY(-1px)', e.target.style.boxShadow = '0 4px 16px rgba(0, 229, 255, 0.4)')} onMouseLeave={e => activeFile && !isSaving && (e.target.style.transform = '', e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.3)')}>
+            {isSaving ? <span> <span className="spin" style={{display:'inline-block',width:14,height:14,border:'2px solid white',borderRightColor:'transparent',borderRadius:'50%',marginRight:6}} /> Guardando... </span> : 'Guardar'}
           </button>
         </div>
 
@@ -122,6 +122,7 @@ export default function ScriptEditor({ packPath }) {
           }}
         />
       </div>
+      <ToastContainer toasts={toasts} onClose={removeToast} />
     </div>
   );
 }

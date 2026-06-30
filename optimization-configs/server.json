@@ -1,0 +1,70 @@
+{
+  "id": "server",
+  "name": "Server Optimizations",
+  "description": "Optimizations for dedicated server configs",
+  "author": "Modpack Assist",
+  "version": "1.0.0",
+  "tags": ["server", "dedicated", "tps"],
+  "categories": {
+    "server_performance": {
+      "forge-server.toml": {
+        "alwaysSetupTerrainOffThread": true,
+        "removeErroringEntities": true,
+        "removeErroringTileEntities": true,
+        "maxEntityCramming": 24,
+        "networkCompressionThreshold": 256
+      },
+      "paper.yml": {
+        "ticks-per-animal-spawns": 400,
+        "ticks-per-monster-spawns": 1,
+        "max-auto-save-chunks-per-tick": 24,
+        "optimize-explosions": true,
+        "mob-spawn-range": 6,
+        "container-update-tick-rate": 2
+      },
+      "spigot.yml": {
+        "save-user-cache-on-stop-only": true,
+        "entity-activation-range": {
+          "animals": 16,
+          "monsters": 24,
+          "raiders": 48,
+          "misc": 8
+        },
+        "merge-radius": {
+          "item": 4.0,
+          "xp": 6.0
+        }
+      }
+    },
+    "server_entities": {
+      "server.properties": {
+        "view-distance": 8,
+        "simulation-distance": 6,
+        "max-tick-time": 60000,
+        "max-chained-neighbor-updates": 1000000,
+        "entity-broadcast-range-percentage": 80
+      },
+      "paper-global.yml": {
+        "disable-chest-cat-detection": true,
+        "disable-creeper-lingering-effect": true,
+        "armor-stands-tick": false,
+        "non-player-arrow-despawn-rate": 20,
+        "creative-arrow-despawn-rate": 20,
+        "prevent-moving-into-unloaded-chunks": true
+      }
+    },
+    "server_network": {
+      "paper.yml": {
+        "use-alternative-keepalive": true,
+        "alternative-keepalive-interval": 5000,
+        "max-packet-size": 33554432
+      }
+    }
+  },
+  "filePatterns": {
+    "server_performance": ["*forge*server*.toml", "*paper*.yml", "*spigot*.yml"],
+    "server_entities": ["server.properties", "*paper*global*.yml"],
+    "server_network": ["*paper*.yml"]
+  },
+  "mergeStrategy": "merge"
+}

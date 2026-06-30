@@ -1,252 +1,158 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs/promises';
-import AdmZip from 'adm-zip';
-import toml from '@iarna/toml';
-import crypto from 'crypto';
-import dotenv from 'dotenv';
-import si from 'systeminformation';
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const path = require('path');
+const fs = require('fs/promises');
+const AdmZip = require('adm-zip');
+const crypto = require('crypto');
+const dotenv = require('dotenv');
+const si = require('systeminformation');
+const logger = require('./logger.cjs');
+const errors = require('./services/errors.cjs');
+const opt = require('./services/optimizationManager.cjs');
+const sec = require('./services/security.cjs');
+const constants = require('./constants.cjs');
+const Bottleneck = require('bottleneck');
 
+function deepMerge(target, source) {
+  const output = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] instanceof Object && key in target && target[key] instanceof Object) {
+      output[key] = deepMerge(target[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
 
-// Sanitización de rutas: previene path traversal
-const sanitizePath = (userPath, basePath) => {
-  if (!userPath || typeof userPath !== 'string') return null;
-  if (userPath.includes('..') || userPath.includes('~')) return null;
-  if (path.isAbsolute(userPath)) return null;
-  const resolved = path.resolve(basePath, userPath);
-  const baseResolved = path.resolve(basePath);
-  if (!resolved.startsWith(baseResolved + path.sep) && resolved !== baseResolved) return null;
-  return resolved;
-};
-
-// Validación de IDs de objetos/entidades (namespace:path)
-const validateItemId = (id) => /^[a-z0-9_.-]+:[a-z0-9_.\/-]+$/i.test(id);
-
-// Validación de versiones semver-like (ej: 1.20.1, 1.21, 1.19.2)
-const validateGameVersion = (v) => /^\d+\.\d+(\.\d+)?(-[a-zA-Z0-9]+)?$/.test(v);
-
-// Límites de seguridad
-const MAX_READ_SIZE = 10 * 1024 * 1024;
-const MAX_DOWNLOAD_SIZE = 200 * 1024 * 1024;
-const MAX_ZIP_SIZE = 500 * 1024 * 1024;
-
-const validateFileSize = async (filePath, maxSize) => {
-  const { size } = await fs.stat(filePath);
-  if (size > maxSize) throw new Error('Archivo excede el límite de tamaño.');
-  return size;
-};
+const { getOptimizationLoader } = require('./services/optimizationConfigLoader.cjs');
+const { getHardwareOptimizationProfile, getCategoryDescriptions } = require('./services/hardwareRecommendations.cjs');
+const { getSearchCache } = require('./services/searchCache.cjs');
+const bottleneck = require('./services/bottleneckDetection.cjs');
+const apiStatus = require('./services/apiStatus.cjs');
 
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
+process.on('uncaughtException', (error) => {
+  logger.error(`[UNCAUGHT_EXCEPTION] ${error.message}`, { stack: error.stack });
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason?.message || reason || 'Unknown reason';
+  logger.error(`[UNHANDLED_REJECTION] ${message}`, { stack: reason?.stack });
+});
 
 const CF_API_KEY = process.env.CURSEFORGE_API_KEY;
 
-// Obtener rutas base del proyecto
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// --- SECCIÓN: Escaneo de modpack ---
-async function handleFolderOpen(event, knownPath) { 
-  let rootPath = knownPath;
+const rateLimiter = new Bottleneck({ minTime: 100 });
 
-  if (!rootPath) {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: 'Selecciona la carpeta raíz de tu Modpack',
-      properties: ['openDirectory']
-    });
-
-    if (canceled) return null;
-    rootPath = filePaths[0];
-  }
-
-  const itemsInRoot = await fs.readdir(rootPath);
-
-  let modsPath = itemsInRoot.includes('mods') ? path.join(rootPath, 'mods') : rootPath;
-
-  let configFiles = [];
-  let scriptFiles = [];
-  try {
-    if (itemsInRoot.includes('config')) configFiles = await fs.readdir(path.join(rootPath, 'config'));
-    if (itemsInRoot.includes('scripts')) scriptFiles = await fs.readdir(path.join(rootPath, 'scripts'));
-  } catch (e) { console.log("Error leyendo carpetas de apoyo"); }
-
-  let modpackInfo = {
-    name: path.basename(rootPath),
-    gameVersion: "1.12.2",
-    loader: "Forge",
-    path: rootPath 
-  };
-
-  try {
-    if (itemsInRoot.includes('minecraftinstance.json')) {
-      const data = JSON.parse(await fs.readFile(path.join(rootPath, 'minecraftinstance.json'), 'utf-8'));
-      modpackInfo.name = data.name || modpackInfo.name;
-      modpackInfo.gameVersion = data.gameVersion || modpackInfo.gameVersion;
-      modpackInfo.loader = data.baseModLoader?.name || "Forge";
-    } else if (itemsInRoot.includes('manifest.json')) {
-      const data = JSON.parse(await fs.readFile(path.join(rootPath, 'manifest.json'), 'utf-8'));
-      modpackInfo.name = data.name || modpackInfo.name;
-      modpackInfo.gameVersion = data.minecraft?.version || modpackInfo.gameVersion;
+const wrapClientWithRateLimit = (client) => {
+  const wrapped = {};
+  for (const [key, fn] of Object.entries(client)) {
+    if (typeof fn === 'function') {
+      wrapped[key] = rateLimiter.wrap(fn);
     }
-  } catch (e) { console.log("No se pudo leer archivo de instancia."); }
-
-  try {
-    const files = await fs.readdir(modsPath);
-    const jarFiles = files.filter(file => file.endsWith('.jar'));
-    const modsData = [];
-
-    for (const file of jarFiles) {
-      const filePath = path.join(modsPath, file);
-      let modName = file.replace('.jar', '');
-      let modVersion = 'Desconocida';
-      let modId = modName.toLowerCase().split(/[_\-\s]/)[0];
-
-      let iconBase64 = null;
-
-      try {
-        await validateFileSize(filePath, MAX_ZIP_SIZE);
-        const zip = new AdmZip(filePath);
-        const fabricJson = zip.getEntry('fabric.mod.json');
-        const forgeToml = zip.getEntry('META-INF/mods.toml');
-        const mcmodInfo = zip.getEntry('mcmod.info');
-
-        let expectedLogo = 'logo.png'; 
-
-        if (fabricJson) {
-          const data = JSON.parse(zip.readAsText(fabricJson));
-          modName = data.name || modName;
-          modVersion = data.version || modVersion;
-          if (data.icon) expectedLogo = data.icon.replace(/^\/+/, ''); 
-        } else if (forgeToml) {
-          const data = toml.parse(zip.readAsText(forgeToml));
-          if (data.mods && data.mods[0]) {
-            modName = data.mods[0].displayName || modName;
-            modVersion = data.mods[0].version || modVersion;
-            if (data.mods[0].logoFile) expectedLogo = data.mods[0].logoFile;
-          }
-        } else if (mcmodInfo) {
-          try {
-            let textData = zip.readAsText(mcmodInfo).replace(/\n/g, '').replace(/,(\s*[\]}])/g, '$1');
-            const data = JSON.parse(textData);
-            const mod = Array.isArray(data) ? data[0] : (data.modList ? data.modList[0] : data);
-            modName = mod.name || modName;
-            modVersion = mod.version || modVersion;
-            if (mod.logoFile) expectedLogo = mod.logoFile;
-          } catch(e) {}
-        }
-
-        let iconEntry = zip.getEntry(expectedLogo) || zip.getEntry('icon.png') || zip.getEntry('logo.png') || zip.getEntry('pack.png');
-        
-        if (iconEntry) {
-          const buffer = zip.readFile(iconEntry);
-          iconBase64 = `data:image/png;base64,${buffer.toString('base64')}`;
-        }
-      } catch (err) {}
-
-      if (modVersion === 'Desconocida') {
-        const versionMatch = file.match(/[_\-\s](v?[\d\.]+[a-zA-Z0-9-]*)\.jar$/i);
-        if (versionMatch) {
-          modVersion = versionMatch[1];
-          modName = modName.replace(versionMatch[0].replace('.jar', ''), '').trim();
-        }
-      }
-
-      const cleanModName = modName.toLowerCase().replace(/[\s_\-]/g, '');
-      const cleanModId = modId.toLowerCase().replace(/[\s_\-]/g, '');
-
-      const relatedConfigs = configFiles.filter(cfg => {
-        const cleanCfg = cfg.toLowerCase().replace(/[\s_\-]/g, '');
-        return cleanCfg.includes(cleanModName) || cleanCfg.includes(cleanModId);
-      });
-
-      const relatedScripts = scriptFiles.filter(scr => {
-        const cleanScr = scr.toLowerCase().replace(/[\s_\-]/g, '');
-        return cleanScr.includes(cleanModName) || cleanScr.includes(cleanModId);
-      });
-
-      modsData.push({ 
-        id: file, 
-        name: modName.replace(/[\s\-_]+$/, ''), 
-        version: modVersion,
-        icon: iconBase64,
-        configs: relatedConfigs, 
-        scripts: relatedScripts  
-      });
-    }
-
-    return { mods: modsData, info: modpackInfo, rootFiles: itemsInRoot };
-  } catch (err) {
-    console.error("Error en el escaneo:", err);
-    return null;
   }
-}
+  return wrapped;
+};
 
-// --- SECCIÓN: Ventana principal ---
+const apiClientsPromise = Promise.all([
+  import('./services/api/clients/curseforge.js'),
+  import('./services/api/clients/modrinth.js')
+]).then(([curseforge, modrinth]) => ({
+  curseforge: wrapClientWithRateLimit(curseforge),
+  modrinth: wrapClientWithRateLimit(modrinth)
+}))
+  .catch(err => {
+    logger.error('[apiClientsPromise] Failed to load API clients:', err);
+    return { curseforge: null, modrinth: null };
+  });
+
+const modpackScanner = require('./services/modpackScanner.js').default;
+
+const calculateModpackWeight = (totalMods, totalSizeMB, optimizationCount, heavyCount) => {
+  let score = 5;
+  if (totalMods > constants.MODPACK_WEIGHT.MODS_MEDIUM) score += 1;
+  if (totalMods > constants.MODPACK_WEIGHT.MODS_LARGE) score += 1;
+  if (totalSizeMB > constants.MODPACK_WEIGHT.SIZE_MEDIUM) score += 1;
+  if (totalSizeMB > constants.MODPACK_WEIGHT.SIZE_LARGE) score += 1;
+  if (totalSizeMB > constants.MODPACK_WEIGHT.SIZE_VERY_LARGE) score += 1;
+  if (heavyCount >= 3) score += 1;
+  if (heavyCount >= 5) score += 1;
+  if (optimizationCount === 0) score += 1;
+  if (optimizationCount >= 2) score -= 1;
+  if (totalMods < constants.MODPACK_WEIGHT.MODS_SMALL) score -= 1;
+  if (totalSizeMB < constants.MODPACK_WEIGHT.SIZE_SMALL) score -= 1;
+  score = Math.max(1, Math.min(10, score));
+  return { score, totalMods, totalSizeMB, optimizationCount, heavyCount };
+};
+
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1400, height: 850, title: "Modpack Assist", autoHideMenuBar: true,
+    width: constants.WINDOW_WIDTH, height: constants.WINDOW_HEIGHT, title: "Modpack Assist", autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'), 
       nodeIntegration: false, contextIsolation: true
     }
   });
-  win.loadURL('http://localhost:5173');
+  if (process.env.NODE_ENV === 'development' || process.env.VITE_DEV_SERVER_URL) {
+    win.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
+  } else {
+    win.loadFile(path.join(__dirname, 'dist', 'index.html'));
+  }
 }
 
-// --- SECCIÓN: Handlers IPC ---
 app.whenReady().then(() => {
   createWindow(); 
   
-  ipcMain.handle('dialog:openFolder', handleFolderOpen);
+  ipcMain.handle('dialog:openFolder', async (event, knownPath) => { return await modpackScanner.handleFolderOpen(event, knownPath); });
 
 
 
   ipcMain.handle('read-full-file', async (event, filePath, packPath) => {
     try {
-      const targetPath = sanitizePath(filePath, packPath);
+      const targetPath = sec.sanitizePath(filePath, packPath);
       if (!targetPath) return { success: false, message: `Ruta inválida.` };
       const stats = await fs.stat(targetPath);
       if (stats.isDirectory()) {
         return { success: false, message: `⛔ '${filePath}' es una CARPETA. El editor solo puede abrir archivos.` };
       }
-      await validateFileSize(targetPath, MAX_READ_SIZE);
+      await sec.validateFileSize(targetPath, sec.MAX_READ_SIZE);
       const content = await fs.readFile(targetPath, 'utf-8');
       return { success: true, content: content };
-    } catch {
+    } catch (err) {
+      logger.error(`[read-full-file] ${err.message}`);
       return { success: false, message: `Error al leer el archivo.` };
     }
   });
 
-
-
   ipcMain.handle('write-file', async (event, filePath, packPath, content) => {
     try {
-      const targetPath = sanitizePath(filePath, packPath);
+      const targetPath = sec.sanitizePath(filePath, packPath);
       if (!targetPath) return { success: false, message: `Ruta inválida.` };
       await fs.writeFile(targetPath, content, 'utf-8');
       return { success: true, message: `Sobrescritura completada.` };
-    } catch { return { success: false, message: `Fallo al escribir archivo.` }; }
+    } catch (err) { logger.error(`[write-file] ${err.message}`); return { success: false, message: `Fallo al escribir archivo.` }; }
   });
 
   ipcMain.handle('delete-file', async (event, filePath, packPath) => {
     try {
-      const targetPath = sanitizePath(filePath, packPath);
+      const targetPath = sec.sanitizePath(filePath, packPath);
       if (!targetPath) return { success: false, message: `Ruta inválida.` };
       await fs.access(targetPath);
       await fs.unlink(targetPath); 
       return { success: true, message: `Eliminación ejecutada.` };
-    } catch { return { success: false, message: `Archivo no localizado.` }; }
+    } catch (err) { logger.error(`[delete-file] ${err.message}`); return { success: false, message: `Archivo no localizado.` }; }
   });
 
   ipcMain.handle('rename-file', async (event, oldPathName, newPathName, packPath) => {
     try {
-      const oldPath = sanitizePath(oldPathName, packPath);
-      const newPath = sanitizePath(newPathName, packPath);
+      const oldPath = sec.sanitizePath(oldPathName, packPath);
+      const newPath = sec.sanitizePath(newPathName, packPath);
       if (!oldPath || !newPath) return { success: false, message: `Ruta inválida.` };
       await fs.access(oldPath);
       await fs.rename(oldPath, newPath); 
       return { success: true, message: `Renombrado completado.` };
-    } catch { return { success: false, message: `Origen no localizado.` }; }
+    } catch (err) { logger.error(`[rename-file] ${err.message}`); return { success: false, message: `Origen no localizado.` }; }
   });
 
   ipcMain.handle('create-project', async (event, projectData) => {
@@ -286,18 +192,19 @@ app.whenReady().then(() => {
         rootFiles: ['mods', 'config', 'scripts', 'manifest.json'] 
       };
     } catch (err) {
-      console.error("Error creando proyecto:", err);
+      logger.error("Error creando proyecto:", err);
       return null;
     }
   });
 
   ipcMain.handle('search-mods-online', async (event, query, gameVersion, loader, sortBy = 'downloads', category = '') => {
-    if (!query || !/^[a-zA-Z0-9\s\-_]+$/.test(query)) return { success: false, message: 'Consulta inválida.' };
-    if (gameVersion && !validateGameVersion(gameVersion)) return { success: false, message: 'Versión de MC inválida.' };
+    if (!query || !/^[a-zA-Z0-9\s\-_.]+$/.test(query)) return { success: false, message: 'Consulta inválida.' };
+    if (gameVersion && !sec.validateGameVersion(gameVersion)) return { success: false, message: 'Versión de MC inválida.' };
     const safeLoader = loader ? loader.toLowerCase() : "forge";
     const modloaderId = safeLoader === 'forge' ? 1 : (safeLoader === 'fabric' ? 4 : 5);
     
     try {
+      const { curseforge, modrinth } = await apiClientsPromise;
       // --- 1. MODRINTH ---
       // Filtrar por loader y versión de MC
       let facetsArray = [
@@ -307,8 +214,7 @@ app.whenReady().then(() => {
       if (category) facetsArray.push([`categories:${category}`]);
       
 
-      const modrinthUrl = `https://api.modrinth.com/v2/search?query=${query}&facets=${encodeURIComponent(JSON.stringify(facetsArray))}&index=${sortBy}&limit=200`;
-      const modrinthRes = await fetch(modrinthUrl);
+      const modrinthRes = await modrinth.searchMods({ query, facets: facetsArray, sortBy, limit: 200 });
       const modrinthData = await modrinthRes.json();
 
       const modrinthResults = modrinthData.hits.map(mod => ({
@@ -327,10 +233,13 @@ app.whenReady().then(() => {
         const cfSort = sortBy === 'downloads' ? 4 : (sortBy === 'newest' ? 2 : 1);
         
 
-        const cfUrl = `https://api.curseforge.com/v1/mods/search?gameId=432&classId=6&searchFilter=${query}&modLoaderType=${modloaderId}&gameVersion=${gameVersion}&sortField=${cfSort}&sortOrder=desc&pageSize=50`;
-        
-        const cfRes = await fetch(cfUrl, {
-          headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' }
+        const cfRes = await curseforge.searchMods({
+          apiKey: CF_API_KEY,
+          query,
+          gameVersion,
+          modloaderId,
+          sortField: cfSort,
+          pageSize: 50
         });
 
         if (cfRes.ok) {
@@ -346,10 +255,10 @@ app.whenReady().then(() => {
           }));
         } else {
           const errorText = await cfRes.text();
-          console.warn(`⚠️ CurseForge rechazó la conexión. (${cfRes.status}): ${errorText}`);
+          logger.warn(`⚠️ CurseForge rechazó la conexión. (${cfRes.status}): ${errorText}`);
         }
       } catch (cfError) {
-        console.warn("⚠️ No se pudo conectar a CurseForge:", cfError.message);
+        logger.warn("⚠️ No se pudo conectar a CurseForge:", cfError.message);
       }
 
       // --- 3. MEZCLAMOS Y FILTRAMOS ---
@@ -359,24 +268,27 @@ app.whenReady().then(() => {
       return { success: true, results: uniqueResults };
       
     } catch (err) {
-      console.error("Error crítico en el buscador:", err);
+      logger.error("Error crítico en el buscador:", err);
       return { success: false, message: "Fallo de conexión principal." };
     }
   });
 
   ipcMain.handle('get-mod-versions', async (event, projectId, gameVersion, loader, source) => {
-    if (gameVersion && !validateGameVersion(gameVersion)) return { success: false, message: 'Versión de MC inválida.' };
+    if (gameVersion && !sec.validateGameVersion(gameVersion)) return { success: false, message: 'Versión de MC inválida.' };
     if (projectId && source === 'curseforge' && !/^\d+$/.test(projectId)) return { success: false, message: 'ID de proyecto inválido.' };
     try {
+      const { curseforge, modrinth } = await apiClientsPromise;
       const safeLoader = loader ? loader.toLowerCase() : "forge";
 
        if (source === 'curseforge') {
         if (!/^\d+$/.test(projectId)) return { success: false, message: 'ID de proyecto inválido.' };
         const modloaderId = safeLoader === 'forge' ? 1 : (safeLoader === 'fabric' ? 4 : 5);
-        const cfUrl = `https://api.curseforge.com/v1/mods/${projectId}/files?gameVersion=${gameVersion}&modLoaderType=${modloaderId}`;
-        
-
-        const res = await fetch(cfUrl, { headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' } });
+        const res = await curseforge.getModFiles({
+          apiKey: CF_API_KEY,
+          projectId,
+          gameVersion,
+          modloaderId
+        });
         
         if (!res.ok) throw new Error("Fallo de conexión con CurseForge API.");
         const data = await res.json();
@@ -395,7 +307,7 @@ app.whenReady().then(() => {
         return { success: true, versions: formattedVersions };
       } 
       else {
-        const res = await fetch(`https://api.modrinth.com/v2/project/${projectId}/version`);
+        const res = await modrinth.getProjectVersions(projectId);
         const versions = await res.json();
 
         const validVersions = versions.filter(v => 
@@ -411,12 +323,12 @@ app.whenReady().then(() => {
 
         return { success: true, versions: formattedVersions };
       }
-    } catch { return { success: false, message: 'Error al obtener versiones.' }; }
+    } catch (err) { logger.error(`[get-mod-versions] ${err.message}`); return { success: false, message: 'Error al obtener versiones.' }; }
   });
 
-  // --- SECCIÓN: Descarga de mods ---
   ipcMain.handle('download-mod', async (event, versionObj, packPath) => {
     try {
+      const { curseforge, modrinth } = await apiClientsPromise;
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
       let downloadUrl = '';
       let fileName = '';
@@ -427,8 +339,10 @@ app.whenReady().then(() => {
         
         if (!downloadUrl) {
 
-          const res = await fetch(`https://api.curseforge.com/v1/mods/${versionObj.projectId}/files/${versionObj.id}/download-url`, {
-            headers: { 'x-api-key': CF_API_KEY, 'Accept': 'application/json' }
+          const res = await curseforge.getDownloadUrl({
+            apiKey: CF_API_KEY,
+            projectId: versionObj.projectId,
+            fileId: versionObj.id
           });
           
           if (res.ok) {
@@ -455,7 +369,7 @@ app.whenReady().then(() => {
       
       } else {
         if (!/^[a-zA-Z0-9_-]+$/.test(versionObj.id)) return { success: false, message: 'ID de versión inválido.' };
-        const res = await fetch(`https://api.modrinth.com/v2/version/${versionObj.id}`);
+        const res = await modrinth.getVersion(versionObj.id);
         const versionData = await res.json();
         const fileInfo = versionData.files.find(f => f.primary) || versionData.files[0];
         downloadUrl = fileInfo.url;
@@ -463,48 +377,40 @@ app.whenReady().then(() => {
       }
 
       if (!downloadUrl || !downloadUrl.startsWith('https://')) return { success: false, message: 'URL de descarga inválida.' };
-      if (!fileName || fileName.includes('..') || fileName.includes('/') || !fileName.endsWith('.jar')) return { success: false, message: 'Nombre de archivo inválido.' };
+
+      const allowedDomains = ['cdn.modrinth.com', 'files.curseforge.com'];
+      let urlDomain;
+      try { urlDomain = new URL(downloadUrl).hostname; } catch { return { success: false, message: 'URL de descarga inválida.' }; }
+      if (!allowedDomains.includes(urlDomain)) return { success: false, message: 'Dominio de descarga no autorizado.' };
+
+      if (!fileName || fileName.includes('..') || fileName.includes('/') || !fileName.endsWith('.jar') || /[^\x00-\x7F]/.test(fileName)) return { success: false, message: 'Nombre de archivo inválido.' };
 
       const modRes = await fetch(downloadUrl);
+      const contentType = modRes.headers.get('content-type');
+      const allowedContentTypes = ['application/java-archive', 'application/zip', 'application/x-java-archive', 'application/x-zip-compressed'];
+      if (contentType && !allowedContentTypes.some(ct => contentType.includes(ct))) {
+        return { success: false, message: 'Content-Type de descarga no autorizado.' };
+      }
       const contentLength = modRes.headers.get('content-length');
-      if (contentLength && parseInt(contentLength) > MAX_DOWNLOAD_SIZE) return { success: false, message: 'El archivo excede el tamaño máximo de descarga.' };
+      if (contentLength && parseInt(contentLength) > sec.MAX_DOWNLOAD_SIZE) return { success: false, message: 'El archivo excede el tamaño máximo de descarga.' };
       const buffer = await modRes.arrayBuffer();
-      if (buffer.byteLength > MAX_DOWNLOAD_SIZE) return { success: false, message: 'El archivo excede el tamaño máximo de descarga.' };
+      if (buffer.byteLength > sec.MAX_DOWNLOAD_SIZE) return { success: false, message: 'El archivo excede el tamaño máximo de descarga.' };
       
-      const destPath = sanitizePath(fileName, path.join(packPath, 'mods'));
+      const destPath = sec.sanitizePath(fileName, path.join(packPath, 'mods'));
       if (!destPath) return { success: false, message: 'Ruta de destino inválida.' };
       await fs.writeFile(destPath, Buffer.from(buffer));
 
       return { success: true, fileName: fileName };
-    } catch {
+    } catch (err) {
+      logger.error(`[download-mod] ${err.message}`);
       return { success: false, message: 'Error al descargar el mod.' };
     }
 });
 
-  // --- SECCIÓN: Evaluación de peso del modpack ---
-  const OPTIMIZATION_MODS = ['sodium', 'lithium', 'phosphor', 'ferritecore', 'entityculling', 'modernfix', 'immediatelyfast', 'enhancedblockentities', 'starlight', 'canary', 'krypton', 'hydrogen', 'lazydfu', 'smoothboot', 'fastload', 'memoryleakfix', 'betterfpsdist', 'particleculling', 'connectivity', 'farsight', 'oculus'];
-  const HEAVY_MODS = ['create', 'mekanism', 'biomesoplenty', 'ad_astra', 'adastra', 'tectonic', 'terralith', 'alexsmobs', 'alexs_mobs', 'enderio', 'ender_io', 'thermal', 'draconicevolution', 'draconic_evolution', 'arsnouveau', 'ars_nouveau', 'botania', 'thaumcraft', 'twilightforest', 'iceandfire', 'ice_and_fire', 'minecolonies', 'appliedenergistics', 'refinedstorage', 'gregtech', 'gregtechceu', 'oculus', 'iris'];
-
-  const getModNameFromJar = (zip, fileName) => {
-    try {
-      const fabricJson = zip.getEntry('fabric.mod.json');
-      if (fabricJson) {
-        const data = JSON.parse(zip.readAsText(fabricJson));
-        return (data.name || fileName).toLowerCase().replace(/[\s_-]/g, '');
-      }
-      const forgeToml = zip.getEntry('META-INF/mods.toml');
-      if (forgeToml) {
-        const data = toml.parse(zip.readAsText(forgeToml));
-        if (data.mods && data.mods[0]) return (data.mods[0].modId || fileName).toLowerCase().replace(/[\s_-]/g, '');
-      }
-    } catch {}
-    return fileName.toLowerCase().replace(/[\s_-]/g, '');
-  };
-
   ipcMain.handle('assess-modpack-weight', async (event, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const modsPath = sanitizePath('mods', packPath);
+      const modsPath = sec.sanitizePath('mods', packPath);
       if (!modsPath) return { success: false, message: 'Ruta inválida.' };
       const files = await fs.readdir(modsPath);
       const jarFiles = files.filter(f => f.endsWith('.jar'));
@@ -519,12 +425,13 @@ app.whenReady().then(() => {
           const stats = await fs.stat(filePath);
           totalSizeBytes += stats.size;
 
-          await validateFileSize(filePath, MAX_ZIP_SIZE);
+          await sec.validateFileSize(filePath, sec.MAX_ZIP_SIZE);
           const zip = new AdmZip(filePath);
-          const modName = getModNameFromJar(zip, file);
-          if (OPTIMIZATION_MODS.some(k => modName.includes(k))) optimizationCount++;
-          if (HEAVY_MODS.some(k => modName.includes(k))) heavyCount++;
-        } catch {
+          const modName = opt.getModNameFromJar(zip, file);
+          if (opt.OPTIMIZATION_MODS.some(k => modName.includes(k))) optimizationCount++;
+          if (opt.HEAVY_MODS.some(k => modName.includes(k))) heavyCount++;
+        } catch (zipErr) {
+          logger.error(`[assess-modpack-weight] zip: ${zipErr.message}`);
           totalSizeBytes += 0;
         }
       }
@@ -532,32 +439,20 @@ app.whenReady().then(() => {
       const totalSizeMB = parseFloat((totalSizeBytes / (1024 * 1024)).toFixed(1));
       const totalMods = jarFiles.length;
 
-      // Fórmula de score (1 = ligero, 10 = muy pesado)
-      let score = 5;
-      if (totalMods > 80) score += 1;
-      if (totalMods > 120) score += 1;
-      if (totalSizeMB > 500) score += 1;
-      if (totalSizeMB > 1000) score += 1;
-      if (totalSizeMB > 2000) score += 1;
-      if (heavyCount >= 3) score += 1;
-      if (heavyCount >= 5) score += 1;
-      if (optimizationCount === 0) score += 1;
-      if (optimizationCount >= 2) score -= 1;
-      if (totalMods < 30) score -= 1;
-      if (totalSizeMB < 300) score -= 1;
-      score = Math.max(1, Math.min(10, score));
+      const weightReport = calculateModpackWeight(totalMods, totalSizeMB, optimizationCount, heavyCount);
 
-      return { success: true, weightReport: { score, totalMods, totalSizeMB, optimizationCount, heavyCount } };
+      return { success: true, weightReport };
     } catch (error) {
+      logger.error(`[assess-modpack-weight] ${error.message}`);
       return { success: false, message: 'Error al evaluar el peso del modpack.' };
     }
   });
 
-  // --- SECCIÓN: Diagnóstico ---
   ipcMain.handle('diagnose-modpack', async (event, packPath) => {
     try {
+      const { modrinth } = await apiClientsPromise;
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const modsPath = sanitizePath('mods', packPath);
+      const modsPath = sec.sanitizePath('mods', packPath);
       if (!modsPath) return { success: false, message: 'Ruta inválida.' };
       const files = await fs.readdir(modsPath);
       const jarFiles = files.filter(f => f.endsWith('.jar'));
@@ -566,34 +461,31 @@ app.whenReady().then(() => {
 
       let packVersion = "1.20.1", packLoader = "forge";
       try {
-         const manifestPath = sanitizePath('manifest.json', packPath);
+         const manifestPath = sec.sanitizePath('manifest.json', packPath);
          if (manifestPath) {
-           await validateFileSize(manifestPath, MAX_READ_SIZE);
+           await sec.validateFileSize(manifestPath, sec.MAX_READ_SIZE);
            const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'));
            packVersion = manifest.minecraft?.version || manifest.gameVersion || packVersion;
            const loaderStr = manifest.minecraft?.modLoaders?.[0]?.id || manifest._appData?.loader || packLoader;
            packLoader = loaderStr.toLowerCase().includes('fabric') ? 'fabric' : (loaderStr.toLowerCase().includes('neoforge') ? 'neoforge' : 'forge');
          }
-      } catch(e) {}
+      } catch(e) { logger.error(`[diagnose-modpack] parseLoader: ${e.message}`); }
 
-      const fileHashes = {};
-      for (const file of jarFiles) {
-        const filePathForHash = path.join(modsPath, file);
-        await validateFileSize(filePathForHash, MAX_ZIP_SIZE);
-        const buffer = await fs.readFile(filePathForHash);
-        const hash = crypto.createHash('sha1').update(buffer).digest('hex');
-        fileHashes[hash] = file;
-      }
+      const { fileHashes } = await new Promise((resolve, reject) => {
+        const { Worker } = require('worker_threads');
+        const worker = new Worker(path.join(__dirname, 'services/workers/modAnalysisWorker.cjs'), {
+          workerData: { task: 'compute-hashes', modsPath, jarFiles }
+        });
+        worker.on('message', (msg) => { if (msg.type === 'result') resolve(msg); });
+        worker.on('error', (err) => reject(err));
+        worker.on('exit', (code) => { if (code !== 0) reject(new Error('Worker crashed.')); });
+      });
       const hashArray = Object.keys(fileHashes);
 
-      const res = await fetch('https://api.modrinth.com/v2/version_files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hashes: hashArray, algorithm: "sha1" })
-      });
+      const res = await modrinth.getVersionsByHashes({ hashes: hashArray, algorithm: "sha1" });
 
       if (!res.ok) throw new Error("Fallo de conexión con Modrinth API.");
-      const data = await res.json(); 
+      const data = await res.json();
 
       const errors = [];
       const warnings = [];
@@ -616,14 +508,14 @@ app.whenReady().then(() => {
 
         if (!versionData.game_versions.includes(packVersion)) {
           errors.push(`❌ [VERSIÓN] "${fileName}" es para MC ${versionData.game_versions[0] || '?'}, pero tu pack usa ${packVersion}.`);
-          fileStatusMap[fileName.toLowerCase()] = 'error'; 
+          fileStatusMap[fileName.toLowerCase()] = 'error';
           isOk = false;
         }
 
         const vLoaders = versionData.loaders.map(l => l.toLowerCase());
         if (!vLoaders.includes(packLoader)) {
           errors.push(`❌ [LOADER] "${fileName}" es exclusivo de ${vLoaders.join('/')}, pero tu pack usa ${packLoader}.`);
-          fileStatusMap[fileName.toLowerCase()] = 'error'; 
+          fileStatusMap[fileName.toLowerCase()] = 'error';
           isOk = false;
         }
 
@@ -631,7 +523,7 @@ app.whenReady().then(() => {
            for (const dep of versionData.dependencies) {
               if (dep.dependency_type === 'required' && dep.project_id && /^[a-zA-Z0-9_-]+$/.test(dep.project_id) && !installedProjectIds.has(dep.project_id)) {
                  errors.push(`❌ [FALTA DEPENDENCIA] "${fileName}" requiere un mod obligatorio que no tienes instalado.`);
-                 fileStatusMap[fileName.toLowerCase()] = 'error'; 
+                 fileStatusMap[fileName.toLowerCase()] = 'error';
                  isOk = false;
               }
            }
@@ -639,7 +531,7 @@ app.whenReady().then(() => {
 
         if (isOk) {
             okCount++;
-            fileStatusMap[fileName.toLowerCase()] = 'ok'; 
+            fileStatusMap[fileName.toLowerCase()] = 'ok';
         }
       }
 
@@ -660,57 +552,46 @@ app.whenReady().then(() => {
             try {
               const stats = await fs.stat(filePath);
               totalSizeBytes += stats.size;
-              await validateFileSize(filePath, MAX_ZIP_SIZE);
+              await sec.validateFileSize(filePath, sec.MAX_ZIP_SIZE);
               const zip = new AdmZip(filePath);
-              const modName = getModNameFromJar(zip, file);
-              if (OPTIMIZATION_MODS.some(k => modName.includes(k))) optimizationCount++;
-              if (HEAVY_MODS.some(k => modName.includes(k))) heavyCount++;
-            } catch {}
+              const modName = opt.getModNameFromJar(zip, file);
+              if (opt.OPTIMIZATION_MODS.some(k => modName.includes(k))) optimizationCount++;
+              if (opt.HEAVY_MODS.some(k => modName.includes(k))) heavyCount++;
+            } catch (zipErr) { logger.error(`[diagnose-modpack] zip: ${zipErr.message}`); }
           }
 
           const totalSizeMB = parseFloat((totalSizeBytes / (1024 * 1024)).toFixed(1));
           const totalMods = allJars.length;
 
-          let score = 5;
-          if (totalMods > 80) score += 1;
-          if (totalMods > 120) score += 1;
-          if (totalSizeMB > 500) score += 1;
-          if (totalSizeMB > 1000) score += 1;
-          if (totalSizeMB > 2000) score += 1;
-          if (heavyCount >= 3) score += 1;
-          if (heavyCount >= 5) score += 1;
-          if (optimizationCount === 0) score += 1;
-          if (optimizationCount >= 2) score -= 1;
-          if (totalMods < 30) score -= 1;
-          if (totalSizeMB < 300) score -= 1;
-          score = Math.max(1, Math.min(10, score));
-
-          weightReport = { score, totalMods, totalSizeMB, optimizationCount, heavyCount };
-        } catch {}
+          weightReport = calculateModpackWeight(totalMods, totalSizeMB, optimizationCount, heavyCount);
+        } catch (weightErr) { logger.error(`[diagnose-modpack] weight: ${weightErr.message}`); }
       }
 
-      return { success: true, report: { errors, warnings, okCount, total: jarFiles.length, fileStatusMap, weightReport } }; 
+      return { success: true, report: { errors, warnings, okCount, total: jarFiles.length, fileStatusMap, weightReport } };
 
     } catch (error) {
-      console.error(error);
+      logger.error(`[diagnose-modpack] ${error.message}`);
       return { success: false, message: error.message };
     }
   });
 
-  // --- SECCIÓN: Exportación ---
   ipcMain.handle('export-modpack', async (event, packPath, packName) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
+      const absPackPath = path.resolve(packPath);
+      if (!absPackPath.startsWith(path.resolve(process.cwd()))) return { success: false, message: 'Ruta fuera del directorio autorizado.' };
       const zip = new AdmZip();
       zip.addLocalFolder(packPath);
-      const exportDir = sanitizePath('..', packPath);
+      const exportDir = sec.sanitizePath('..', packPath);
       if (!exportDir) return { success: false, message: 'Ruta de exportación inválida.' };
       const exportPath = path.join(path.dirname(packPath), `${packName}_Exportado.zip`);
+      const absExportPath = path.resolve(exportPath);
+      if (!absExportPath.startsWith(path.resolve(process.cwd()))) return { success: false, message: 'Ruta de exportación fuera del directorio autorizado.' };
       zip.writeZip(exportPath);
       shell.showItemInFolder(exportPath);
       return { success: true, path: exportPath };
     } catch (error) {
-      console.error(error);
+      logger.error(error);
       return { success: false, message: error.message };
     }
   });
@@ -718,8 +599,10 @@ app.whenReady().then(() => {
   ipcMain.handle('install-mod-recursively', async (event, initialVersionId, packVersion, packLoader, packPath) => {
     if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
     if (!/^[a-zA-Z0-9_-]+$/.test(initialVersionId)) return { success: false, message: 'ID de versión inválido.' };
-    const modsDir = sanitizePath('mods', packPath);
+    if (packVersion && !sec.validateGameVersion(packVersion)) return { success: false, message: 'Versión de MC inválida.' };
+    const modsDir = sec.sanitizePath('mods', packPath);
     if (!modsDir) return { success: false, message: 'Ruta inválida.' };
+    const { modrinth } = await apiClientsPromise;
     const downloadedIds = new Set();
     const logs = [];
 
@@ -728,7 +611,7 @@ app.whenReady().then(() => {
       downloadedIds.add(versionId);
 
       try {
-        const res = await fetch(`https://api.modrinth.com/v2/version/${versionId}`);
+        const res = await modrinth.getVersion(versionId);
         if (!res.ok) throw new Error("No se encontró la versión en Modrinth.");
         const vData = await res.json();
 
@@ -737,10 +620,10 @@ app.whenReady().then(() => {
         if (!fileInfo.filename || !fileInfo.filename.endsWith('.jar')) throw new Error("El archivo descargado no es un .jar.");
         const modRes = await fetch(fileInfo.url);
         const contentLength = modRes.headers.get('content-length');
-        if (contentLength && parseInt(contentLength) > MAX_DOWNLOAD_SIZE) throw new Error("El archivo excede el tamaño máximo de descarga.");
+        if (contentLength && parseInt(contentLength) > sec.MAX_DOWNLOAD_SIZE) throw new Error("El archivo excede el tamaño máximo de descarga.");
         const buffer = await modRes.arrayBuffer();
-        if (buffer.byteLength > MAX_DOWNLOAD_SIZE) throw new Error("El archivo excede el tamaño máximo de descarga.");
-        const destPath = sanitizePath(fileInfo.filename, modsDir);
+        if (buffer.byteLength > sec.MAX_DOWNLOAD_SIZE) throw new Error("El archivo excede el tamaño máximo de descarga.");
+        const destPath = sec.sanitizePath(fileInfo.filename, modsDir);
         if (!destPath) throw new Error("Ruta de destino inválida.");
         await fs.writeFile(destPath, Buffer.from(buffer));
         
@@ -753,8 +636,11 @@ app.whenReady().then(() => {
                 await processDependencyTree(dep.version_id);
               } else if (dep.project_id && /^[a-zA-Z0-9_-]+$/.test(dep.project_id)) {
                 const safeLoader = packLoader.toLowerCase() === 'neoforge' ? 'forge' : packLoader.toLowerCase();
-                const searchUrl = `https://api.modrinth.com/v2/project/${encodeURIComponent(dep.project_id)}/version?loaders=["${safeLoader}"]&game_versions=["${packVersion}"]`;
-                const depRes = await fetch(searchUrl);
+                const depRes = await modrinth.getProjectVersionsByFilters({
+                  projectId: dep.project_id,
+                  loaders: [safeLoader],
+                  gameVersions: [packVersion]
+                });
                 const depVersions = await depRes.json();
                 
                 if (depVersions.length > 0) {
@@ -777,24 +663,26 @@ app.whenReady().then(() => {
 
   ipcMain.handle('open-external-editor', async (event, filePath, packPath) => {
     try {
-      const exactPath = sanitizePath(filePath, packPath);
+      const exactPath = sec.sanitizePath(filePath, packPath);
       if (!exactPath) return { success: false, message: 'Ruta inválida.' };
       const result = await shell.openPath(exactPath);
       return { success: result === '', message: result || 'Abierto con editor predeterminado.' };
-    } catch {
+    } catch (err) {
+      logger.error(`[open-external-editor] ${err.message}`);
       return { success: false, message: 'Error al abrir archivo.' };
     }
   });
 
   ipcMain.handle('get-game-versions', async () => {
     try {
-      const res = await fetch('https://api.modrinth.com/v2/tag/game_version');
+      const { modrinth } = await apiClientsPromise;
+      const res = await modrinth.getGameVersions();
       if (!res.ok) throw new Error("Fallo de red");
       
       const versions = await res.json();
       return { success: true, versions: versions };
     } catch (error) {
-      console.error("Error al obtener versiones:", error);
+      logger.error("Error al obtener versiones:", error);
       return { success: false, message: error.message };
     }
   });
@@ -804,11 +692,12 @@ app.whenReady().then(() => {
 //  Escanear contenido de una subcarpeta ---
   ipcMain.handle('list-folder-content', async (event, folderPath, packPath) => {
     try {
-      const fullPath = sanitizePath(folderPath, packPath);
+      const fullPath = sec.sanitizePath(folderPath, packPath);
       if (!fullPath) return { success: false, message: 'Ruta inválida.' };
       const files = await fs.readdir(fullPath);
       return { success: true, files };
-    } catch {
+    } catch (err) {
+      logger.error(`[list-folder-content] ${err.message}`);
       return { success: false, message: 'Error al leer carpeta.' };
     }
   });
@@ -816,9 +705,9 @@ app.whenReady().then(() => {
   ipcMain.handle('explore-jar-contents', async (event, jarName, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const jarSanitized = sanitizePath(jarName, path.join(packPath, 'mods'));
+      const jarSanitized = sec.sanitizePath(jarName, path.join(packPath, 'mods'));
       if (!jarSanitized) return { success: false, message: 'Nombre de mod inválido.' };
-      await validateFileSize(jarSanitized, MAX_ZIP_SIZE);
+      await sec.validateFileSize(jarSanitized, sec.MAX_ZIP_SIZE);
       const zip = new AdmZip(jarSanitized);
       const zipEntries = zip.getEntries();
       const internalFiles = [];
@@ -831,7 +720,8 @@ app.whenReady().then(() => {
       });
       internalFiles.sort();
       return { success: true, files: internalFiles };
-    } catch {
+    } catch (err) {
+      logger.error(`[explore-jar-contents] ${err.message}`);
       return { success: false, message: 'Error al abrir el mod.' };
     }
   });
@@ -839,26 +729,26 @@ app.whenReady().then(() => {
   ipcMain.handle('read-jar-file', async (event, jarName, internalPath, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const jarSanitized = sanitizePath(jarName, path.join(packPath, 'mods'));
+      const jarSanitized = sec.sanitizePath(jarName, path.join(packPath, 'mods'));
       if (!jarSanitized) return { success: false, message: 'Nombre de mod inválido.' };
-      await validateFileSize(jarSanitized, MAX_ZIP_SIZE);
+      await sec.validateFileSize(jarSanitized, sec.MAX_ZIP_SIZE);
       const zip = new AdmZip(jarSanitized);
       const entry = zip.getEntry(internalPath);
       if (!entry) return { success: false, message: 'Archivo no encontrado dentro del mod.' };
       const content = zip.readAsText(entry);
       return { success: true, content: content };
-    } catch {
+    } catch (err) {
+      logger.error(`[read-jar-file] ${err.message}`);
       return { success: false, message: 'Error al leer archivo interno.' };
     }
   });
 
-
   // Spawn control
   ipcMain.handle('inject-spawn-control', async (event, tweakData, packPath) => {
     try {
-      if (!tweakData || !validateItemId(tweakData.entityId)) return { success: false, message: 'ID de entidad inválido.' };
+      if (!tweakData || !sec.validateItemId(tweakData.entityId)) return { success: false, message: 'ID de entidad inválido.' };
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const kubejsPath = sanitizePath('kubejs/server_scripts', packPath);
+      const kubejsPath = sec.sanitizePath('kubejs/server_scripts', packPath);
       if (!kubejsPath) return { success: false, message: 'Ruta inválida.' };
       await fs.mkdir(kubejsPath, { recursive: true });
       const scriptPath = path.join(kubejsPath, '3_spawn_tweaks.js');
@@ -872,11 +762,12 @@ app.whenReady().then(() => {
       if (tweakData.damage) lines.push(`    event.entity.setAttributeBaseValue('minecraft:generic.attack_damage', ${tweakData.damage});`);
       if (lines.length === 0) return { success:false, message:'No tweak data provided' };
 
-      const safeSpawnEntityId = tweakData.entityId.replace(/'/g, "\\'");
+      const safeSpawnEntityId = sec.sanitizeForScript(tweakData.entityId);
       const rule = `EntityEvents.spawned(event => {\n  if (event.entity.type === '${safeSpawnEntityId}') {\n${lines.map(l => '    '+l).join('\n')}\n  }\n});\n`;
       await fs.appendFile(scriptPath, rule, 'utf-8');
       return { success: true, message: `Spawn control applied for ${safeSpawnEntityId}` };
     } catch (err) {
+      logger.error(`[inject-spawn-control] ${err.message}`);
       return { success: false, message: 'Error al aplicar control de spawn.' };
     }
   });
@@ -885,14 +776,15 @@ app.whenReady().then(() => {
   ipcMain.handle('loot-editor-apply', async (event, packPath, lootPath, patch) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta del pack inválida.' };
-      const targetPath = sanitizePath(lootPath, packPath);
+      const targetPath = sec.sanitizePath(lootPath, packPath);
       if (!targetPath) return { success: false, message: 'Ruta de loot inválida.' };
       let base = {};
       try {
-        await validateFileSize(targetPath, MAX_READ_SIZE);
+        await sec.validateFileSize(targetPath, sec.MAX_READ_SIZE);
         const raw = await fs.readFile(targetPath, 'utf-8');
         base = JSON.parse(raw);
-      } catch {
+      } catch (readErr) {
+        logger.error(`[loot-editor-apply] read: ${readErr.message}`);
         base = {};
       }
       const merge = (dst, src) => {
@@ -909,6 +801,7 @@ app.whenReady().then(() => {
       await fs.writeFile(targetPath, JSON.stringify(base, null, 2), 'utf-8');
       return { success: true, message: `Loot edited: ${lootPath}` };
     } catch (err) {
+      logger.error(`[loot-editor-apply] ${err.message}`);
       return { success: false, message: 'Error al editar loot.' };
     }
   });
@@ -939,8 +832,8 @@ app.whenReady().then(() => {
       return tree;
     };
 
-    const kubejsDir = sanitizePath('kubejs', packPath);
-    const scriptsDir = sanitizePath('scripts', packPath);
+    const kubejsDir = sec.sanitizePath('kubejs', packPath);
+    const scriptsDir = sec.sanitizePath('scripts', packPath);
     const kubejsTree = kubejsDir ? await scanDir(kubejsDir) : [];
     const craftTweakerTree = scriptsDir ? await scanDir(scriptsDir) : [];
 
@@ -949,30 +842,33 @@ app.whenReady().then(() => {
       data: { kubejs: kubejsTree, scripts: craftTweakerTree } 
     };
   } catch (err) {
+    logger.error(`[scripts:get-tree] ${err.message}`);
     return { success: false, message: 'Error al escanear scripts.' };
   }
 });
 
 ipcMain.handle('scripts:read', async (event, filePath, packPath) => {
   try {
-    const targetPath = sanitizePath(filePath, packPath);
+    const targetPath = sec.sanitizePath(filePath, packPath);
     if (!targetPath) return { success: false, message: 'Ruta inválida.' };
-    await validateFileSize(targetPath, MAX_READ_SIZE);
+    await sec.validateFileSize(targetPath, sec.MAX_READ_SIZE);
     const content = await fs.readFile(targetPath, 'utf-8');
     return { success: true, data: content };
-  } catch {
+  } catch (err) {
+    logger.error(`[scripts:read] ${err.message}`);
     return { success: false, message: 'Error al leer el script.' };
   }
 });
 
 ipcMain.handle('scripts:save', async (event, filePath, content, packPath) => {
   try {
-    const targetPath = sanitizePath(filePath, packPath);
+    const targetPath = sec.sanitizePath(filePath, packPath);
     if (!targetPath) return { success: false, message: 'Ruta inválida.' };
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
     await fs.writeFile(targetPath, content, 'utf-8');
     return { success: true, message: 'Script guardado correctamente.' };
-  } catch {
+  } catch (err) {
+    logger.error(`[scripts:save] ${err.message}`);
     return { success: false, message: 'Error al guardar el script.' };
   }
 });
@@ -1019,7 +915,7 @@ ipcMain.handle('get-system-specs', async () => {
       }
     };
   } catch (error) {
-    console.error("Error escaneando el hardware:", error);
+    logger.error("Error escaneando el hardware:", error);
     return { success: false, message: error.message };
   }
 });
@@ -1027,7 +923,7 @@ ipcMain.handle('get-system-specs', async () => {
 ipcMain.handle('scanMods', async (event, packPath) => {
     try {
         if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-        const modsPath = sanitizePath('mods', packPath);
+        const modsPath = sec.sanitizePath('mods', packPath);
         if (!modsPath) return { success: false, message: 'Ruta inválida.' };
         const files = await fs.readdir(modsPath);
         const modsData = [];
@@ -1050,8 +946,8 @@ ipcMain.handle('scanMods', async (event, packPath) => {
         }
 
         return { success: true, mods: modsData };
-        
     } catch (error) {
+        logger.error(`[scanMods] ${error.message}`);
         return { success: false, message: error.message };
     }
 });
@@ -1059,14 +955,14 @@ ipcMain.handle('scanMods', async (event, packPath) => {
   // --- INYECCIÓN DE BALANCE DE ÍTEMS ---
   ipcMain.handle('inject-item-tweak', async (event, tweakData, packPath) => {
     try {
-      if (!tweakData || !validateItemId(tweakData.itemId)) return { success: false, message: 'ID de objeto inválido.' };
+      if (!tweakData || !sec.validateItemId(tweakData.itemId)) return { success: false, message: 'ID de objeto inválido.' };
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const kubejsPath = sanitizePath('kubejs/startup_scripts', packPath);
+      const kubejsPath = sec.sanitizePath('kubejs/startup_scripts', packPath);
       if (!kubejsPath) return { success: false, message: 'Ruta inválida.' };
       await fs.mkdir(kubejsPath, { recursive: true });
       const scriptPath = path.join(kubejsPath, '1_item_tweaks.js');
 
-      const safeItemId = tweakData.itemId.replace(/'/g, "\\'");
+      const safeItemId = sec.sanitizeForScript(tweakData.itemId);
       let script = `\nItemEvents.modification(event => {\n  event.modify('${safeItemId}', item => {\n`;
       if (tweakData.damage) script += `    item.attackDamage = ${tweakData.damage};\n`;
       if (tweakData.armor) script += `    item.armorProtection = ${tweakData.armor};\n`;
@@ -1076,20 +972,21 @@ ipcMain.handle('scanMods', async (event, packPath) => {
       await fs.appendFile(scriptPath, script, 'utf-8');
       return { success: true, message: `✅ Balance inyectado exitosamente a: ${safeItemId} (Startup Script)` };
     } catch (err) {
+      logger.error(`[inject-item-tweak] ${err.message}`);
       return { success: false, message: 'Error al inyectar ajuste de ítem.' };
     }
   });
 
   ipcMain.handle('inject-entity-tweak', async (event, tweakData, packPath) => {
     try {
-      if (!tweakData || !validateItemId(tweakData.entityId)) return { success: false, message: 'ID de entidad inválido.' };
+      if (!tweakData || !sec.validateItemId(tweakData.entityId)) return { success: false, message: 'ID de entidad inválido.' };
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const kubejsPath = sanitizePath('kubejs/server_scripts', packPath);
+      const kubejsPath = sec.sanitizePath('kubejs/server_scripts', packPath);
       if (!kubejsPath) return { success: false, message: 'Ruta inválida.' };
       await fs.mkdir(kubejsPath, { recursive: true });
       const scriptPath = path.join(kubejsPath, '2_entity_tweaks.js');
 
-      const safeEntityId = tweakData.entityId.replace(/'/g, "\\'");
+      const safeEntityId = sec.sanitizeForScript(tweakData.entityId);
       let script = `\nEntityEvents.spawned(event => {\n  if (event.entity.type === '${safeEntityId}') {\n`;
       if (tweakData.health) {
         script += `    event.entity.setAttributeBaseValue('minecraft:generic.max_health', ${tweakData.health});\n`;
@@ -1102,12 +999,12 @@ ipcMain.handle('scanMods', async (event, packPath) => {
       await fs.appendFile(scriptPath, script, 'utf-8');
       return { success: true, message: `✅ Mutación genética aplicada a: ${safeEntityId}` };
     } catch (err) {
+      logger.error(`[inject-entity-tweak] ${err.message}`);
       return { success: false, message: 'Error al inyectar mutación.' };
     }
   });
 
 
-// --- SECCIÓN: Escaneo de IDs de mods ---
 ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
       let extractedIds = new Set(); 
       
@@ -1121,7 +1018,7 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
               if (file.endsWith('.jar')) {
                   try {
                       const jarPath = path.join(normalizedPath, file);
-                      await validateFileSize(jarPath, MAX_ZIP_SIZE);
+                      await sec.validateFileSize(jarPath, sec.MAX_ZIP_SIZE);
                       const zip = new AdmZip(jarPath);
                       const zipEntries = zip.getEntries();
 
@@ -1141,7 +1038,7 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
           }
           return [...extractedIds].sort();
       } catch (error) {
-          console.error("Error al leer la carpeta mods:", error);
+          logger.error("Error al leer la carpeta mods:", error);
           return [];
       }
   });
@@ -1157,7 +1054,7 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
         score += Math.min(sizeMB * 1.5, 45);
 
         // Abrimos el mod en la memoria (súper rápido, no extrae nada al disco)
-        await validateFileSize(filePath, MAX_ZIP_SIZE);
+        await sec.validateFileSize(filePath, sec.MAX_ZIP_SIZE);
         const zip = new AdmZip(filePath);
         const zipEntries = zip.getEntries();
 
@@ -1202,7 +1099,7 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
         return Math.round(score);
 
     } catch (error) {
-        console.warn(`No se pudo analizar internamente ${filePath}:`, error.message);
+        logger.warn(`No se pudo analizar internamente ${filePath}:`, error.message);
         return 20; // Puntaje medio por defecto si el archivo .jar está bloqueado o corrupto
     }
 }
@@ -1211,84 +1108,93 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
   ipcMain.handle('calculate-all-impacts', async (event, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const modsPath = sanitizePath('mods', packPath);
+      const modsPath = sec.sanitizePath('mods', packPath);
       if (!modsPath) return { success: false, message: 'Ruta inválida.' };
       const files = await fs.readdir(modsPath);
-      const scores = {};
+      const jarFiles = files.filter(f => f.endsWith('.jar'));
 
-      for (const file of files) {
-        if (file.endsWith('.jar')) {
-          const filePath = path.join(modsPath, file);
-          scores[file] = await calculateModImpact(filePath);
-        }
-      }
-      return { success: true, scores };
+      return new Promise((resolve) => {
+        const { Worker } = require('worker_threads');
+        const worker = new Worker(path.join(__dirname, 'services/workers/modAnalysisWorker.cjs'), {
+          workerData: { task: 'calculate-impacts', modsPath, jarFiles }
+        });
+        worker.on('message', (msg) => {
+          if (msg.type === 'result') resolve({ success: true, scores: msg.scores });
+        });
+        worker.on('error', (err) => resolve({ success: false, message: err.message }));
+        worker.on('exit', (code) => { if (code !== 0) resolve({ success: false, message: 'Worker crashed.' }); });
+      });
     } catch (error) {
+      logger.error(`[calculate-all-impacts] ${error.message}`);
       return { success: false, message: error.message };
     }
   });
 
   // --- OPTIMIZACIÓN INTELIGENTE ---
 
-  const OPTIMIZATION_CATEGORIES = {
-    gpu_vram: {
-      'sodium-options.json': { 'quality.graphics_quality': 'FANCY', 'quality.smooth_lighting': 'OFF', 'performance.fog': 'FAST' },
-      'embeddium-options.json': { 'quality.graphics_quality': 'FANCY', 'quality.smooth_lighting': 'OFF', 'performance.fog': 'FAST' },
-      'oculus.properties': { 'shaderPack': '', 'internalShaders': false, 'fog': false },
-      'iris.properties': { 'shaderPack': '', 'internalShaders': false, 'fog': false }
-    },
-    cpu_maps: {
-      'xaerominimap.toml': { 'enable_update_chunks': false, 'update_frequency': 0, 'enable_entity_icons': false, 'max_entities': 32 },
-      'xaeroworldmap.toml': { 'enable_cave_mapping': false, 'max_zoom_level': 2 },
-      'journeymap.core.config': { 'renderDistance': 2, 'surfaceMapping': false }
-    },
-    cpu_entities: {
-      'entityculling.toml': { 'cull_blocks': true, 'cull_entities': true, 'cull_distance': 64 },
-      'alexsmobs.toml': { 'limit_spawns': true, 'spawn_weight_multiplier': 0.5 },
-      'iceandfire.toml': { 'dragon_spawn_distance': 1000, 'dragon_griefing': 0 },
-      'physicsmod.json': { 'mobPhysics': false, 'blockPhysics': false, 'vinePhysics': false, 'itemPhysics': false }
-    },
-    engine_system: {
-      'betterfpsdist.toml': { 'reduced_view_distance': 32, 'fast_render': true },
-      'particleculling.properties': { 'cull_particles': true, 'max_particles': 200 },
-      'connectivity.properties': { 'timeout': 10000, 'retry_attempts': 1 },
-      'farsight.toml': { 'fake_chunks': false, 'max_chunks': 256 },
-      'forge-client.toml': { 'alwaysSetupTerrainOffThread': true }
+  let optimizationLoader = null;
+
+  async function getOptimizationRules(selectedCategories, profileId = 'default') {
+    if (!optimizationLoader) {
+      optimizationLoader = getOptimizationLoader();
+      await optimizationLoader.loadConfigs();
     }
-  };
 
-  const parseConfigValue = (raw, key) => {
-    const ruleKey = Object.keys(OPTIMIZATION_RULES).find(r => key.endsWith(r)) || key;
-    const rules = OPTIMIZATION_RULES[ruleKey];
-    if (!rules) return null;
-    const val = rules[key];
-    if (typeof val === 'boolean') return val ? 'true' : 'false';
-    if (typeof val === 'number') return String(val);
-    return val;
-  };
+    // Load base rules from profile
+    let baseRules = {};
+    const profile = optimizationLoader.getConfig(profileId);
+    
+    if (profile && profile.categories) {
+      // Merge all categories from the profile
+      for (const [catName, catRules] of Object.entries(profile.categories)) {
+        Object.assign(baseRules, catRules);
+      }
+    } else if (profileId === 'default') {
+      // Fallback to builtin default from optimizationManager
+      for (const cat of selectedCategories) {
+        if (opt.OPTIMIZATION_CATEGORIES[cat]) {
+          Object.assign(baseRules, opt.OPTIMIZATION_CATEGORIES[cat]);
+        }
+      }
+    }
 
-  ipcMain.handle('optimization:start', async (event, packPath, selectedCategories = ['gpu_vram', 'cpu_maps', 'cpu_entities', 'engine_system']) => {
+    // Filter by selectedCategories - only keep rules from selected categories
+    const activeRules = {};
+    for (const cat of selectedCategories) {
+      if (profile && profile.categories && profile.categories[cat]) {
+        // If profile has this category, use it
+        for (const [file, rules] of Object.entries(profile.categories[cat])) {
+          Object.assign(activeRules, { [file]: rules });
+        }
+      } else if (opt.OPTIMIZATION_CATEGORIES[cat]) {
+        // Otherwise use builtin
+        for (const [file, rules] of Object.entries(opt.OPTIMIZATION_CATEGORIES[cat])) {
+          Object.assign(activeRules, { [file]: rules });
+        }
+      }
+    }
+
+    // If no rules matched selectedCategories, return all base rules
+    return Object.keys(activeRules).length > 0 ? activeRules : baseRules;
+  }
+
+  ipcMain.handle('optimization:start', async (event, packPath, selectedCategories = ['gpu_vram', 'cpu_maps', 'cpu_entities', 'engine_system'], profileId = 'default') => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const configDir = sanitizePath('config', packPath);
-      const backupDir = sanitizePath('.modpack_assist_backups', packPath);
+      const configDir = sec.sanitizePath('config', packPath);
+      const backupDir = sec.sanitizePath('.modpack_assist_backups', packPath);
       if (!configDir || !backupDir) return { success: false, message: 'Ruta inválida.' };
       await fs.mkdir(backupDir, { recursive: true });
 
       let allFiles;
-      try { allFiles = await fs.readdir(configDir); } catch { return { success: false, message: 'No se encontró carpeta config/' }; }
+      try { allFiles = await fs.readdir(configDir); } catch (err) { logger.error(`[optimization:start] ${err.message}`); return { success: false, message: 'No se encontró carpeta config/' }; }
 
       const results = [];
 
-      // 1. Unimos las reglas SOLO de las categorías que el usuario seleccionó
-      let activeRules = {};
-      for (const cat of selectedCategories) {
-        if (OPTIMIZATION_CATEGORIES[cat]) {
-          Object.assign(activeRules, OPTIMIZATION_CATEGORIES[cat]);
-        }
-      }
+      // 1. Obtener reglas desde el loader dinámico o builtin
+      let activeRules = await getOptimizationRules(selectedCategories, profileId);
 
-      // 2. Aplicar las reglas activas (Cambia OPTIMIZATION_RULES por activeRules)
+      // 2. Aplicar las reglas activas
       for (const [ruleFile, rules] of Object.entries(activeRules)) {
         const match = allFiles.find(f => f.toLowerCase() === ruleFile.toLowerCase() || f.toLowerCase().endsWith('/' + ruleFile.toLowerCase()));
         if (!match) continue;
@@ -1300,7 +1206,7 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
         await fs.copyFile(fullPath, backupPath);
 
         const ext = path.extname(match).toLowerCase();
-        await validateFileSize(fullPath, MAX_READ_SIZE);
+        await sec.validateFileSize(fullPath, sec.MAX_READ_SIZE);
         let raw = await fs.readFile(fullPath, 'utf-8');
         let modified = false;
 
@@ -1320,18 +1226,20 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
           let obj;
           try {
             obj = JSON.parse(raw);
+            const mergedRules = {};
             for (const [jkey, jval] of Object.entries(rules)) {
               const jparts = jkey.split('.');
-              let cur = obj;
+              let cur = mergedRules;
               for (let i = 0; i < jparts.length - 1; i++) {
                 if (!cur[jparts[i]]) cur[jparts[i]] = {};
                 cur = cur[jparts[i]];
               }
               cur[jparts[jparts.length - 1]] = jval;
             }
+            obj = deepMerge(obj, mergedRules);
             raw = JSON.stringify(obj, null, 2);
             modified = true;
-          } catch { /* skip invalid json */ }
+          } catch (parseErr) { logger.error(`[optimization:start] JSON inválido en ${match}: ${parseErr.message}`); }
         } else if (ext === '.properties' || ext === '.cfg') {
           for (const [key, value] of Object.entries(rules)) {
             const regex = new RegExp(`^[#!]?\\s*${key}\\s*[=:]\\s*.*$`, 'm');
@@ -1368,12 +1276,12 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
   ipcMain.handle('optimization:rollback', async (event, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const backupDir = sanitizePath('.modpack_assist_backups', packPath);
-      const configDir = sanitizePath('config', packPath);
+      const backupDir = sec.sanitizePath('.modpack_assist_backups', packPath);
+      const configDir = sec.sanitizePath('config', packPath);
       if (!backupDir || !configDir) return { success: false, message: 'Ruta inválida.' };
 
       let backupFiles;
-      try { backupFiles = await fs.readdir(backupDir); } catch { return { success: false, message: 'No hay respaldo disponible.' }; }
+      try { backupFiles = await fs.readdir(backupDir); } catch (err) { logger.error(`[optimization:rollback] ${err.message}`); return { success: false, message: 'No hay respaldo disponible.' }; }
 
       for (const file of backupFiles) {
         const src = path.join(backupDir, file);
@@ -1384,7 +1292,8 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
       await fs.rm(backupDir, { recursive: true, force: true });
 
       return { success: true, message: `Restaurados ${backupFiles.length} archivos.` };
-    } catch {
+    } catch (err) {
+      logger.error(`[optimization:rollback] ${err.message}`);
       return { success: false, message: 'Error al restaurar el respaldo.' };
     }
   });
@@ -1392,13 +1301,249 @@ ipcMain.handle('scan-mod-ids', async (event, modsPath) => {
   ipcMain.handle('optimization:check-status', async (event, packPath) => {
     try {
       if (!packPath || packPath.includes('..') || packPath.includes('~')) return { success: false, message: 'Ruta inválida.' };
-      const backupDir = sanitizePath('.modpack_assist_backups', packPath);
+      const backupDir = sec.sanitizePath('.modpack_assist_backups', packPath);
       if (!backupDir) return { success: false, hasBackup: false, fileCount: 0 };
       let files = [];
-      try { files = await fs.readdir(backupDir); } catch { /* no backup */ }
+      try { files = await fs.readdir(backupDir); } catch (e) { logger.error(`[optimization:check-status] ${e.message}`); }
       return { success: true, hasBackup: files.length > 0, fileCount: files.length };
     } catch (err) {
       return { success: false, hasBackup: false, fileCount: 0 };
+    }
+  });
+
+  // --- OPTIMIZATION CONFIG LOADER HANDLERS ---
+  ipcMain.handle('optimization:configs:list', async () => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+        await optimizationLoader.loadConfigs();
+      }
+      return { success: true, configs: optimizationLoader.getAllConfigs() };
+    } catch (err) {
+      logger.error(`[optimization:configs:list] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:configs:get', async (event, configId) => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+        await optimizationLoader.loadConfigs();
+      }
+      const config = optimizationLoader.getConfig(configId);
+      if (!config) {
+        return { success: false, message: 'Config not found' };
+      }
+      return { success: true, config: optimizationLoader.sanitizeConfig(config) };
+    } catch (err) {
+      logger.error(`[optimization:configs:get] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:configs:categories', async () => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+        await optimizationLoader.loadConfigs();
+      }
+      return { success: true, categories: optimizationLoader.getCategories() };
+    } catch (err) {
+      logger.error(`[optimization:configs:categories] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:configs:create', async (event, config) => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+        await optimizationLoader.loadConfigs();
+      }
+      const created = await optimizationLoader.createConfig(config);
+      return { success: true, config: optimizationLoader.sanitizeConfig(created) };
+    } catch (err) {
+      logger.error(`[optimization:configs:create] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:configs:delete', async (event, configId) => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+        await optimizationLoader.loadConfigs();
+      }
+      const deleted = await optimizationLoader.deleteConfig(configId);
+      return { success: deleted, message: deleted ? 'Config deleted' : 'Config not found' };
+    } catch (err) {
+      logger.error(`[optimization:configs:delete] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:configs:reload', async () => {
+    try {
+      if (!optimizationLoader) {
+        optimizationLoader = getOptimizationLoader();
+      }
+      await optimizationLoader.loadConfigs();
+      return { success: true, configs: optimizationLoader.getAllConfigs() };
+    } catch (err) {
+      logger.error(`[optimization:configs:reload] ${err.message}`);
+      return { success: false, message: err.message };
+    }
+  });
+
+  ipcMain.handle('optimization:hardware:recommend', async () => {
+    try {
+      const [mem, cpu, graphics] = await Promise.all([
+        si.mem(),
+        si.cpu(),
+        si.graphics()
+      ]);
+
+      let bestGpu = null;
+      if (graphics.controllers && graphics.controllers.length > 0) {
+        bestGpu = graphics.controllers.reduce((prev, current) => {
+          const prevVram = prev.vram || 0;
+          const currentVram = current.vram || 0;
+          return (prevVram > currentVram) ? prev : current;
+        });
+      }
+
+      const hardware = {
+        ram: {
+          totalGB: parseFloat((mem.total / (1024 ** 3)).toFixed(2)),
+          availableGB: parseFloat((mem.available / (1024 ** 3)).toFixed(2))
+        },
+        cpu: {
+          manufacturer: cpu.manufacturer,
+          brand: cpu.brand,
+          physicalCores: cpu.physicalCores,
+          logicalCores: cpu.cores
+        },
+        gpu: bestGpu ? {
+          vendor: bestGpu.vendor,
+          model: bestGpu.model,
+          vramGB: bestGpu.vram ? parseFloat((bestGpu.vram / 1024).toFixed(2)) : 0
+        } : null
+      };
+
+      const result = await getHardwareOptimizationProfile(hardware);
+      result.categoryDescriptions = getCategoryDescriptions();
+
+      return { success: true, data: result };
+    } catch (error) {
+      logger.error(`[optimization:hardware:recommend] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('optimization:hardware:categories', async () => {
+    return { success: true, categories: getCategoryDescriptions() };
+  });
+
+  ipcMain.handle('optimization:bottlenecks:analyze', async (event, packPath) => {
+    try {
+      if (!packPath || packPath.includes('..') || packPath.includes('~')) {
+        return { success: false, message: 'Ruta inválida.' };
+      }
+
+      const [mem, cpu, graphics] = await Promise.all([
+        si.mem(),
+        si.cpu(),
+        si.graphics()
+      ]);
+
+      let bestGpu = null;
+      if (graphics.controllers && graphics.controllers.length > 0) {
+        bestGpu = graphics.controllers.reduce((prev, current) => {
+          const prevVram = prev.vram || 0;
+          const currentVram = current.vram || 0;
+          return (prevVram > currentVram) ? prev : current;
+        });
+      }
+
+      const hardwareSpecs = {
+        ram: {
+          totalGB: parseFloat((mem.total / (1024 ** 3)).toFixed(2)),
+          availableGB: parseFloat((mem.available / (1024 ** 3)).toFixed(2))
+        },
+        cpu: {
+          manufacturer: cpu.manufacturer,
+          brand: cpu.brand,
+          physicalCores: cpu.physicalCores,
+          logicalCores: cpu.cores
+        },
+        gpu: bestGpu ? {
+          vendor: bestGpu.vendor,
+          model: bestGpu.model,
+          vramGB: bestGpu.vram ? parseFloat((bestGpu.vram / 1024).toFixed(2)) : 0
+        } : null
+      };
+
+      const report = await bottleneck.analyzeBottlenecks(packPath, hardwareSpecs);
+      return { success: true, report };
+    } catch (error) {
+      logger.error(`[optimization:bottlenecks:analyze] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('optimization:bottlenecks:quickscan', async (event, packPath) => {
+    try {
+      if (!packPath || packPath.includes('..') || packPath.includes('~')) {
+        return { success: false, message: 'Ruta inválida.' };
+      }
+      const scan = await bottleneck.quickScan(packPath);
+      return { success: true, scan };
+    } catch (error) {
+      logger.error(`[optimization:bottlenecks:quickscan] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('api:status', async () => {
+    try {
+      const status = await apiStatus.getStatus();
+      return { success: true, status };
+    } catch (error) {
+      logger.error(`[api:status] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('api:status:refresh', async () => {
+    try {
+      const status = await apiStatus.forceRefresh();
+      return { success: true, status };
+    } catch (error) {
+      logger.error(`[api:status:refresh] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('search:cache:clear', async () => {
+    try {
+      const cache = getSearchCache({ maxSizeMB: 50, maxEntries: 500 });
+      await cache.clear();
+      return { success: true, message: 'Caché de búsqueda limpiado' };
+    } catch (error) {
+      logger.error(`[search:cache:clear] ${error.message}`);
+      return { success: false, message: error.message };
+    }
+  });
+
+  ipcMain.handle('search:cache:stats', async () => {
+    try {
+      const cache = getSearchCache({ maxSizeMB: 50, maxEntries: 500 });
+      const stats = await cache.getStats();
+      return { success: true, stats };
+    } catch (error) {
+      logger.error(`[search:cache:stats] ${error.message}`);
+      return { success: false, message: error.message };
     }
   });
 

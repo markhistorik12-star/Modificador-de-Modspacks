@@ -2,14 +2,23 @@ import { Handle, Position } from 'reactflow';
 import { Box } from 'lucide-react';
 
 export default function ModNode({ data }) {
+  const tooltip = [
+    data.label,
+    `Versión: ${data.version || 'Desconocida'}`,
+    data.impactScore !== undefined ? `Impacto: ${data.impactScore} pts` : null,
+    data.hasConfigs ? 'Tiene archivos de configuración' : null,
+    data.source ? `Fuente: ${data.source}` : null,
+  ].filter(Boolean).join('\n');
+
   return (
-    <div 
+    <div
+      data-tooltip={tooltip}
       style={{ 
-        background: '#1e1e2e', 
+        background: '#1a1d24', 
         color: 'white', 
         padding: '12px 15px', 
         borderRadius: '10px', 
-        border: '2px solid #cba6f7', 
+        border: '2px solid #00e5ff', 
         display: 'flex', 
         alignItems: 'center', 
         gap: '12px', 
@@ -19,20 +28,20 @@ export default function ModNode({ data }) {
       }}
     >
       {/* Punto de conexión superior (Entrada/Target) */}
-      <Handle type="target" position={Position.Top} style={{ background: '#cba6f7', border: 'none' }} />
+      <Handle type="target" position={Position.Top} style={{ background: '#00e5ff', border: 'none' }} />
       
       {/* --- RENDERIZADO DINÁMICO DEL ICONO --- */}
       <div style={{
         width: '42px',
         height: '42px',
         borderRadius: '8px',
-        background: '#11111b', // Fondo más oscuro para resaltar el icono
+        background: '#0d0f12', // Fondo más oscuro para resaltar el icono
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         overflow: 'hidden',
         flexShrink: 0,
-        border: '1px solid #313244'
+        border: '1px solid #2a2e36'
       }}>
         {data.icon ? (
           <img 
@@ -42,7 +51,7 @@ export default function ModNode({ data }) {
           />
         ) : (
           /* Fallback: Si no hay icono oficial, usamos tu Box de lucide-react */
-          <Box size={24} color="#cba6f7" />
+          <Box size={24} color="#00e5ff" />
         )}
       </div>
       
@@ -58,20 +67,20 @@ export default function ModNode({ data }) {
         }}>
           {data.label}
         </span>
-        <span style={{ fontSize: '11px', color: '#a6adc8', fontFamily: 'monospace' }}>
+        <span style={{ fontSize: '11px', color: '#9ca3af', fontFamily: 'monospace' }}>
           v: {data.version}
         </span>
         
         {/* Indicador visual si el mod tiene archivos de configuración modificables */}
         {data.hasConfigs && (
-          <span style={{ fontSize: '10px', color: '#a6e3a1', marginTop: '4px', fontWeight: 'bold' }}>
-            ⚙️ Configs detectadas
+          <span style={{ fontSize: '10px', color: '#00e67a', marginTop: '4px', fontWeight: 'bold' }}>
+            Configs detectadas
           </span>
         )}
       </div>
 
       {/* Punto de conexión inferior (Salida/Source) */}
-      <Handle type="source" position={Position.Bottom} style={{ background: '#cba6f7', border: 'none' }} />
+      <Handle type="source" position={Position.Bottom} style={{ background: '#00e5ff', border: 'none' }} />
     </div>
   );
 }
