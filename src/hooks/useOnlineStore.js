@@ -4,6 +4,7 @@ export function useOnlineStore(packInfo) {
   const [onlineSearchQuery, setOnlineSearchQuery] = useState('');
   const [onlineResults, setOnlineResults] = useState([]);
   const [isSearchingOnline, setIsSearchingOnline] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [sortBy, setSortBy] = useState('downloads');
   const [modCategory, setModCategory] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -26,11 +27,24 @@ export function useOnlineStore(packInfo) {
   }), [apiStatus]);
 
   const handleSearchOnline = useCallback(async () => {
-    if (!window.electronAPI || !packInfo) return;
+    if (!window.electronAPI) return;
+    const gameVersion = packInfo?.gameVersion || '1.20.1';
+    const loader = packInfo?.loader || 'forge';
     setIsSearchingOnline(true);
+    setHasSearched(true);
     setCurrentPage(1);
-    const result = await window.electronAPI.searchModsOnline(onlineSearchQuery, packInfo.gameVersion, packInfo.loader, sortBy, modCategory);
-    if (result?.success) setOnlineResults(result.results);
+    try {
+      const result = await window.electronAPI.searchModsOnline(onlineSearchQuery, gameVersion, loader, sortBy, modCategory);
+      if (result?.success) {
+        setOnlineResults(result.results || []);
+      } else {
+        console.warn('[store] Search failed:', result?.message);
+        setOnlineResults([]);
+      }
+    } catch (err) {
+      console.error('[store] Search error:', err);
+      setOnlineResults([]);
+    }
     setIsSearchingOnline(false);
   }, [onlineSearchQuery, packInfo, sortBy, modCategory]);
 
@@ -98,13 +112,14 @@ export function useOnlineStore(packInfo) {
   }, [packInfo]);
 
   useEffect(() => {
-    if (packInfo) handleSearchOnline();
-  }, [sortBy, modCategory]);
+    if (packInfo && sortBy) handleSearchOnline();
+  }, [sortBy]);
 
   return {
     onlineSearchQuery, setOnlineSearchQuery,
     onlineResults, setOnlineResults,
     isSearchingOnline, setIsSearchingOnline,
+    hasSearched, setHasSearched,
     sortBy, setSortBy,
     modCategory, setModCategory,
     visibleOnlineCount, setVisibleOnlineCount,

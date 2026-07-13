@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, memo } from 'react';
 import { Check, X, Info, AlertTriangle } from 'lucide-react';
 
 let toastIdCounter = 0;
@@ -41,7 +41,7 @@ const TYPE_STYLES = {
   warning: { gradient: 'linear-gradient(135deg, #ffb347 0%, #ff8c00 100%)', icon: <AlertTriangle size={18} /> },
 };
 
-export default function ToastContainer({ toasts, onClose }) {
+const ToastContainer = memo(function ToastContainer({ toasts, onClose }) {
   if (!toasts || toasts.length === 0) return null;
 
   return (
@@ -89,4 +89,6 @@ export default function ToastContainer({ toasts, onClose }) {
       })}
     </div>
   );
-}
+});
+
+export default ToastContainer;

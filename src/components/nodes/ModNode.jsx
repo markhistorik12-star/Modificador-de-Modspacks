@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import { Box } from 'lucide-react';
 
-export default function ModNode({ data }) {
+const ModNode = memo(function ModNode({ data }) {
   const tooltip = [
     data.label,
     `Versión: ${data.version || 'Desconocida'}`,
@@ -83,4 +84,6 @@ export default function ModNode({ data }) {
       <Handle type="source" position={Position.Bottom} style={{ background: '#00e5ff', border: 'none' }} />
     </div>
   );
-}
+});
+
+export default ModNode;

@@ -198,7 +198,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('search-mods-online', async (event, query, gameVersion, loader, sortBy = 'downloads', category = '') => {
-    if (!query || !/^[a-zA-Z0-9\s\-_.]+$/.test(query)) return { success: false, message: 'Consulta inválida.' };
+    if (query && !/^[a-zA-Z0-9\s\-_.]+$/.test(query)) return { success: false, message: 'Consulta inválida.' };
     if (gameVersion && !sec.validateGameVersion(gameVersion)) return { success: false, message: 'Versión de MC inválida.' };
     const safeLoader = loader ? loader.toLowerCase() : "forge";
     const modloaderId = safeLoader === 'forge' ? 1 : (safeLoader === 'fabric' ? 4 : 5);
@@ -221,7 +221,7 @@ app.whenReady().then(() => {
         project_id: mod.project_id,
         title: mod.title,
         description: mod.description,
-        icon_url: mod.icon_url,
+        icon_url: mod.icon_url ? (mod.icon_url.startsWith('http') ? mod.icon_url : `https://cdn.modrinth.com${mod.icon_url}`) : null,
         author: mod.author,
         downloads: mod.downloads,
         source: 'modrinth'

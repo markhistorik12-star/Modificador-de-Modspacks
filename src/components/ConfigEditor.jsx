@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 
 
-export default function ConfigEditor({ fileName, initialContent, onClose, onSave, onOpenExternal }) {
+const ConfigEditor = memo(function ConfigEditor({ fileName, initialContent, onClose, onSave, onOpenExternal }) {
   const [lines, setLines] = useState([]);
 
   useEffect(() => {
@@ -22,17 +22,16 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
     setLines(parsedLines);
   }, [initialContent]);
 
-  const handleChange = (id, newValue) => {
-    setLines(lines.map(l => l.id === id ? { ...l, value: newValue } : l));
-  };
+  const handleChange = useCallback((id, newValue) => {
+    setLines(prev => prev.map(l => l.id === id ? { ...l, value: newValue } : l));
+  }, []);
 
-  const handleSave = () => {
-    // RECONSTRUCTOR: Vuelve a unir todo preservando los comentarios originales
+  const handleSave = useCallback(() => {
     const newContent = lines.map(l =>
       l.type === 'text' ? l.original : `${l.key}=${l.value}`
     ).join('\n');
     onSave(newContent);
-  };
+  }, [lines, onSave]);
 
   return (
     <div style={{
@@ -117,4 +116,6 @@ export default function ConfigEditor({ fileName, initialContent, onClose, onSave
       </div>
     </div>
   );
-}
+});
+
+export default ConfigEditor;

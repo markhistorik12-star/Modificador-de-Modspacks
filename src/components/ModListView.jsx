@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, memo, useCallback } from 'react';
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow';
 import 'reactflow/dist/style.css';
 import ModNode from './nodes/ModNode';
@@ -6,7 +6,7 @@ import GroupNode from './nodes/GroupNode';
 
 const nodeTypes = { mod: ModNode, group: GroupNode };
 
-export default function ModListView({
+const ModListView = memo(function ModListView({
   nodes,
   edges,
   onNodesChange,
@@ -43,7 +43,7 @@ export default function ModListView({
     });
   }, [nodes, searchMods]);
 
-  const handleSearchKeyDown = (e) => {
+  const handleSearchKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && searchMods && rfInstance) {
       const matches = nodes.filter(n => n.type === 'mod' &&
         n.data.label.toLowerCase().includes(searchMods.toLowerCase()));
@@ -58,26 +58,34 @@ export default function ModListView({
         });
       }
     }
-  };
+  }, [searchMods, rfInstance, nodes]);
+
+  const handleZoomIn = useCallback(() => {
+    if (rfInstance?.setViewport) {
+      const newZoom = Math.min(3, graphZoom + 0.1);
+      setGraphZoom(newZoom);
+      rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
+    }
+  }, [rfInstance, graphZoom, setGraphZoom]);
+
+  const handleZoomOut = useCallback(() => {
+    if (rfInstance?.setViewport) {
+      const newZoom = Math.max(0.2, graphZoom - 0.1);
+      setGraphZoom(newZoom);
+      rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
+    }
+  }, [rfInstance, graphZoom, setGraphZoom]);
+
+  const handleFitView = useCallback(() => {
+    rfInstance?.fitView?.();
+  }, [rfInstance]);
 
   return (
-    <div className="animate-tab" style={{ position: 'relative', width: '100%', height: 'calc(100vh - 112px)' }}>
+    <div className="tab-content" style={{ position: 'relative', width: '100%', height: 'calc(100vh - 112px)' }}>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 50, display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: 8, background: 'rgba(26,29,36,0.9)', border: '1px solid #2a2e36' }}>
-        <button onClick={() => {
-          if (rfInstance?.setViewport) {
-            const newZoom = Math.min(3, graphZoom + 0.1);
-            setGraphZoom(newZoom);
-            rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
-          }
-        }} title="Zoom in" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.1)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>+</button>
-        <button onClick={() => {
-          if (rfInstance?.setViewport) {
-            const newZoom = Math.max(0.2, graphZoom - 0.1);
-            setGraphZoom(newZoom);
-            rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150);
-          }
-        }} title="Zoom out" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.1)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>-</button>
-        <button onClick={() => rfInstance?.fitView?.()} title="Ajustar Vista" style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.05)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>Fit</button>
+        <button onClick={handleZoomIn} title="Zoom in" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.1)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>+</button>
+        <button onClick={handleZoomOut} title="Zoom out" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.1)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>-</button>
+        <button onClick={handleFitView} title="Ajustar Vista" style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: '#00e5ff', color: '#0d0f12', cursor: 'pointer', transition: 'all 0.15s ease' }} onMouseEnter={e => { e.target.style.transform = 'scale(1.05)'; e.target.style.boxShadow = '0 2px 8px rgba(0, 229, 255, 0.4)'; }} onMouseLeave={e => { e.target.style.transform = ''; e.target.style.boxShadow = ''; }}>Fit</button>
         <span style={{ color: '#f8f9fa', fontSize: 12 }}>Zoom</span>
         <input
           type="range" min={0.2} max={2.5} step={0.05}
@@ -136,4 +144,6 @@ export default function ModListView({
       )}
     </div>
   );
-}
+});
+
+export default ModListView;

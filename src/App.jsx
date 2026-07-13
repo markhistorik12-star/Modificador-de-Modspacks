@@ -1,6 +1,12 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, memo } from 'react';
 import ReactFlow, { Background, Controls, MiniMap } from 'reactflow';
 import 'reactflow/dist/style.css';
+import {
+  FolderOpen, Plus, Download, Activity, Settings2, Code2, Box, FileText,
+  Search, X, ChevronRight, Cpu, MemoryStick, Monitor, Zap, AlertTriangle,
+  CheckCircle, RefreshCw, ShoppingCart, Gauge, Wrench, Dna, Layers, Sparkles,
+  Loader2, CircleDot
+} from 'lucide-react';
 import ModNode from './components/nodes/ModNode';
 import GroupNode from './components/nodes/GroupNode';
 import ConfigEditor from './components/ConfigEditor';
@@ -14,13 +20,38 @@ import { useDiagnosis } from './hooks/useDiagnosis';
 import { useOptimization } from './hooks/useOptimization';
 import { useToast } from './hooks/useToast';
 
+const useRipple = () => {
+  const handleRipple = useCallback((e) => {
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    const x = e.clientX - rect.left - size / 2;
+    const y = e.clientY - rect.top - size / 2;
+    const wave = document.createElement('span');
+    wave.className = 'ripple-wave';
+    wave.style.cssText = `width:${size}px;height:${size}px;left:${x}px;top:${y}px;`;
+    btn.appendChild(wave);
+    wave.addEventListener('animationend', () => wave.remove());
+  }, []);
+  return handleRipple;
+};
+
 const nodeTypes = { mod: ModNode, group: GroupNode };
 
-const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorClass }) => {
+const ShortcutRow = ({ keys, desc }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-2) 0', borderBottom: '1px solid var(--border-subtle)' }}>
+    <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>{desc}</span>
+    <kbd style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '2px 8px', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>{keys}</kbd>
+  </div>
+);
+
+const AutocompleteInput = memo(({ value, onChange, availableIds, placeholder, colorClass }) => {
   const [showDropdown, setShowDropdown] = useState(false);
-  const suggestions = value.length > 2
-    ? availableIds.filter(id => id.toLowerCase().includes(value.toLowerCase())).slice(0, 50)
-    : [];
+  const suggestions = useMemo(() => {
+    if (value.length <= 2) return [];
+    const lower = value.toLowerCase();
+    return availableIds.filter(id => id.toLowerCase().includes(lower)).slice(0, 50);
+  }, [value, availableIds]);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -29,16 +60,17 @@ const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorCl
         onChange={(e) => { onChange(e.target.value.toLowerCase()); setShowDropdown(true); }}
         onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
         onFocus={() => setShowDropdown(true)}
-        style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: colorClass, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+        className="input input-mono"
+        style={{ marginTop: '8px', color: colorClass }}
       />
       {showDropdown && suggestions.length > 0 && (
-        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#181825', border: '1px solid #cba6f7', borderRadius: '8px', zIndex: 100, maxHeight: '250px', overflowY: 'auto', padding: 0, margin: '4px 0 0 0', listStyle: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.8)' }}>
+        <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-surface)', border: '1px solid var(--accent-secondary)', borderRadius: 'var(--radius-md)', zIndex: 'var(--z-dropdown)', maxHeight: '250px', overflowY: 'auto', padding: 0, margin: '4px 0 0 0', listStyle: 'none', boxShadow: 'var(--shadow-lg)' }}>
           {suggestions.map((s, i) => (
             <li
               key={i}
               onMouseDown={(e) => { e.preventDefault(); onChange(s); setShowDropdown(false); }}
-              style={{ padding: '10px 15px', cursor: 'pointer', color: '#cdd6f4', borderBottom: '1px solid #313244', fontSize: '13px' }}
-              onMouseEnter={e => e.target.style.background = '#313244'}
+              style={{ padding: '10px 15px', cursor: 'pointer', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--text-sm)' }}
+              onMouseEnter={e => e.target.style.background = 'var(--bg-hover)'}
               onMouseLeave={e => e.target.style.background = 'transparent'}
             >
               {s}
@@ -48,7 +80,7 @@ const AutocompleteInput = ({ value, onChange, availableIds, placeholder, colorCl
       )}
     </div>
   );
-};
+});
 
 const analyzeFilePurpose = (fileName) => {
   const name = fileName.toLowerCase();
@@ -86,6 +118,7 @@ export default function App() {
   const optimization = useOptimization(modpack.packInfo, showToast);
   const [activeTab, setActiveTab] = useState('mods');
   const [graphZoom, setGraphZoom] = useState(1);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const handleAskBotAboutMod = () => {
     alert("[IA] La función de análisis con IA ha sido deshabilitada temporalmente.");
@@ -194,13 +227,26 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (activeTab === 'store' && modpack.packInfo) {
+    if (activeTab === 'store') {
       onlineStore.handleSearchOnline();
       onlineStore.fetchApiStatus();
     }
-  }, [activeTab, modpack.packInfo]);
+  }, [activeTab]);
 
   useEffect(() => { performance.setPackInfo(modpack.packInfo); }, [modpack.packInfo]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && e.key === 'k') { e.preventDefault(); setShowShortcuts(v => !v); }
+      if (showShortcuts) return;
+      if (e.ctrlKey && e.key === 's') { e.preventDefault(); handleSaveConfig(); }
+      if (e.ctrlKey && e.key === 'o') { e.preventDefault(); modpack.handleScanFolder(); }
+      if (e.ctrlKey && e.key === 'e') { e.preventDefault(); if (modpack.packInfo) handleExportModpack(); }
+      if (e.key === 'Escape') { setShowShortcuts(false); modpack.setIsCreatingProject(false); onlineStore.setVersionSelectorModal(null); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showShortcuts, modpack.packInfo]);
 
   const handleConfirmDownload = async (version) => {
     const scanResult = await onlineStore.handleConfirmDownload(version, onlineStore.setVersionSelectorModal, showToast);
@@ -234,8 +280,6 @@ export default function App() {
         .animate-tab { animation: fadeSlideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
         .animate-modal { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
         .toast-enter { animation: slideInRight 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
-        button { transition: all 0.2s ease-in-out; }
-        button:active:not(:disabled) { transform: scale(0.95); }
       `}</style>
 
       {/* SIDEBAR + EDITOR */}
@@ -456,54 +500,68 @@ export default function App() {
       )}
 
       {/* BARRA SUPERIOR */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, boxShadow: '0 8px 25px rgba(0,0,0,.35)' }}>
-        <div style={{ height: '64px', background: 'linear-gradient(135deg, #1b1e2a 0%, #2a2b50 100%)', display: 'flex', alignItems: 'center', padding: '0 24px', borderBottom: '1px solid #3a3a64', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button onClick={modpack.handleScanFolder} style={{ background: '#cba6f7', color: '#11111b', border: 'none', padding: '8px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Cargar Modpack</button>
-            <button onClick={modpack.handleOpenProjectWizard} style={{ background: '#a6e3a1', color: '#11111b', border: 'none', padding: '8px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 0 10px rgba(166, 227, 161, 0.4)' }}>Nuevo Proyecto</button>
+      <div className="topbar">
+        <div className="topbar-primary">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <button onClick={modpack.handleScanFolder} className="btn btn-secondary" style={{ background: 'var(--accent-secondary)', color: 'var(--text-inverse)', fontWeight: 700 }}>
+              <FolderOpen size={16} /> Cargar Modpack
+            </button>
+            <button onClick={modpack.handleOpenProjectWizard} className="btn btn-success">
+              <Plus size={16} /> Nuevo Proyecto
+            </button>
+            <button onClick={() => setShowShortcuts(true)} className="btn btn-secondary" style={{ background: '#313244', border: '1px solid #45475a', fontSize: '12px', padding: '6px 10px' }}>
+              <span style={{ fontFamily: 'monospace' }}>Ctrl+K</span>
+            </button>
           </div>
           {modpack.packInfo && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-6)' }}>
               <div style={{ textAlign: 'center' }}>
-                <span style={{ color: '#89b4fa', fontSize: '11px', fontWeight: '700', letterSpacing: '1px' }}>MODPACK</span>
-                <div style={{ color: '#cdd6f4', fontWeight: 'bold', fontSize: '15px' }}>{modpack.packInfo.name}</div>
+                <div className="topbar-label">MODPACK</div>
+                <div className="topbar-value">{modpack.packInfo.name}</div>
               </div>
-              <div style={{ width: '1px', height: '32px', background: '#45475a' }} />
+              <div className="topbar-divider" />
               <div style={{ textAlign: 'center' }}>
-                <span style={{ color: '#89b4fa', fontSize: '11px', fontWeight: '700', letterSpacing: '1px' }}>MC</span>
-                <div style={{ color: '#cdd6f4', fontWeight: 'bold', fontSize: '15px' }}>{modpack.packInfo.gameVersion}</div>
+                <div className="topbar-label">MC</div>
+                <div className="topbar-value">{modpack.packInfo.gameVersion}</div>
               </div>
             </div>
           )}
           {modpack.packInfo && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <button data-tooltip="Comprimir todo el modpack (mods, configs, scripts) en un archivo ZIP para compartir o respaldar" onClick={() => { showToast("Empaquetando...", "Comprimiendo tus mods. Esto puede tardar.", "loading"); handleExportModpack(); }} style={{ background: '#f9e2af', color: '#11111b', border: 'none', padding: '8px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 0 10px rgba(249, 226, 175, 0.4)' }}>Exportar</button>
-              <button data-tooltip="Detecta versiones incompatibles, dependencias faltantes y conflictos entre mods instalados" onClick={handleDiagnosePack} disabled={diagnosis.isDiagnosing} style={{ background: diagnosis.isDiagnosing ? '#f9e2af' : '#89dceb', color: '#11111b', border: 'none', padding: '8px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: diagnosis.isDiagnosing ? 'wait' : 'pointer', boxShadow: '0 0 10px rgba(137, 220, 235, 0.4)', transition: 'all 0.2s' }}>
-                {diagnosis.isDiagnosing ? 'Analizando...' : 'Diagnosticar'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <button data-tooltip="Comprimir todo el modpack (mods, configs, scripts) en un archivo ZIP" onClick={() => { showToast("Empaquetando...", "Comprimiendo tus mods. Esto puede tardar.", "loading"); handleExportModpack(); }} className="btn btn-warning">
+                <Download size={15} /> Exportar
+              </button>
+              <button data-tooltip="Detecta versiones incompatibles, dependencias faltantes y conflictos" onClick={handleDiagnosePack} disabled={diagnosis.isDiagnosing} className="btn" style={{ background: diagnosis.isDiagnosing ? '#f9e2af' : '#89dceb', color: '#11111b', boxShadow: '0 0 10px rgba(137, 220, 235, 0.4)', cursor: diagnosis.isDiagnosing ? 'wait' : 'pointer' }}>
+                {diagnosis.isDiagnosing ? <><RefreshCw size={15} className="spin" /> Analizando...</> : <><Activity size={15} /> Diagnosticar</>}
               </button>
             </div>
           )}
         </div>
-        <div style={{ height: '48px', background: '#181825', display: 'flex', alignItems: 'center', padding: '0 24px', borderBottom: '1px solid #313244', gap: '4px' }}>
+        <div className="topbar-secondary">
           {[
-            { key: 'mods', label: 'Ecosistema', color: '#cba6f7', tip: 'Vista de grafo con todos los mods y sus conexiones' },
-            { key: 'global', label: 'Config. Gral', color: '#cba6f7', tip: 'Archivos de configuración generales del modpack' },
-            { key: 'store', label: 'Tienda', color: '#cba6f7', tip: 'Buscar y descargar mods desde CurseForge y Modrinth' },
-            { key: 'tweaks', label: 'Tweaks', color: '#f5c2e7', tip: 'Balanceo de ítems y entidades (KubeJS)' },
-            { key: 'performance', label: 'Rendimiento', color: '#fab387', tip: 'Análisis de rendimiento, optimizaciones y detección de cuellos de botella' },
-            { key: 'ide', label: 'Editor IDE', color: '#a6e3a1', tip: 'Editor avanzado de scripts y configuraciones' },
-          ].map(tab => (
-            <button key={tab.key} data-tooltip={tab.tip} onClick={() => setActiveTab(tab.key)} style={{
-              background: activeTab === tab.key ? '#313244' : 'transparent',
-              color: activeTab === tab.key ? tab.color : '#a6adc8',
-              border: 'none', padding: '8px 16px', borderRadius: '6px',
-              cursor: 'pointer', fontWeight: 'bold', fontSize: '14px',
-              transition: 'all 0.2s ease', position: 'relative'
-            }}>
-              {tab.label}
-              {activeTab === tab.key && <div style={{ position: 'absolute', bottom: '-2px', left: '10%', width: '80%', height: '3px', background: tab.color, borderRadius: '2px' }} />}
-            </button>
-          ))}
+            { key: 'mods', label: 'Ecosistema', icon: Box, color: '#cba6f7', tip: 'Vista de grafo con todos los mods y sus conexiones' },
+            { key: 'global', label: 'Config. Gral', icon: Settings2, color: '#cba6f7', tip: 'Archivos de configuración generales del modpack' },
+            { key: 'store', label: 'Tienda', icon: ShoppingCart, color: '#cba6f7', tip: 'Buscar y descargar mods desde CurseForge y Modrinth' },
+            { key: 'tweaks', label: 'Tweaks', icon: Wrench, color: '#f5c2e7', tip: 'Balanceo de ítems y entidades (KubeJS)' },
+            { key: 'performance', label: 'Rendimiento', icon: Gauge, color: '#fab387', tip: 'Análisis de rendimiento y detección de cuellos de botella' },
+            { key: 'ide', label: 'Editor IDE', icon: Code2, color: '#a6e3a1', tip: 'Editor avanzado de scripts y configuraciones' },
+          ].map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button key={tab.key} data-tooltip={tab.tip} onClick={() => setActiveTab(tab.key)} style={{
+                background: activeTab === tab.key ? '#313244' : 'transparent',
+                color: activeTab === tab.key ? tab.color : '#a6adc8',
+                border: 'none', padding: '8px 16px', borderRadius: 'var(--radius-md)',
+                cursor: 'pointer', fontWeight: 'bold', fontSize: '14px',
+                display: 'flex', alignItems: 'center', gap: '6px',
+                transition: 'all var(--duration-fast) var(--ease-out)', position: 'relative'
+              }}>
+                <Icon size={15} />
+                {tab.label}
+                {activeTab === tab.key && <div style={{ position: 'absolute', bottom: '-2px', left: '10%', width: '80%', height: '3px', background: tab.color, borderRadius: '2px' }} />}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -534,11 +592,11 @@ export default function App() {
       )}
 
       {/* CONTENEDOR PRINCIPAL */}
-      <div id="main-scroll-area" style={{ width: '100%', height: '100%', paddingTop: '112px', overflowY: 'auto', boxSizing: 'border-box' }}>
+      <div id="main-scroll-area" className="main-scroll">
 
         {/* PESTAÑA 1: ECOSISTEMA */}
         {activeTab === 'mods' && (
-          <div className="animate-tab" style={{ position: 'relative', width: '100%', height: 'calc(100vh - 112px)' }}>
+          <div className="tab-content" style={{ position: 'relative', width: '100%', height: 'calc(100vh - 112px)' }}>
             <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 50, display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: 8, background: 'rgba(20,20,40,0.9)', border: '1px solid #313244' }}>
               <button onClick={() => { if (modpack.rfInstance?.setViewport) { const newZoom = Math.min(3, graphZoom + 0.1); setGraphZoom(newZoom); modpack.rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150); } }} title="Zoom in" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#2d2f68', color: '#fff', cursor: 'pointer' }}>+</button>
               <button onClick={() => { if (modpack.rfInstance?.setViewport) { const newZoom = Math.max(0.2, graphZoom - 0.1); setGraphZoom(newZoom); modpack.rfInstance.setViewport({ x: 0, y: 0, zoom: newZoom }, 150); } }} title="Zoom out" style={{ width: 28, height: 28, borderRadius: 6, border: 'none', background: '#2d2f68', color: '#fff', cursor: 'pointer' }}>−</button>
@@ -566,7 +624,7 @@ export default function App() {
 
         {/* PESTAÑA 2: ARCHIVOS GLOBALES */}
         {activeTab === 'global' && (
-          <div className="animate-tab" style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
+          <div className="tab-content" style={{ padding: 'var(--space-10)', maxWidth: '800px', margin: '0 auto', paddingBottom: '100px' }}>
             <h2>Configuraciones Globales</h2>
             <p style={{ color: '#a6adc8', marginBottom: '20px' }}>Estructura del directorio detectado en {modpack.packInfo?.name}</p>
             {modpack.rootFiles.length > 0 && (
@@ -594,77 +652,108 @@ export default function App() {
 
         {/* PESTAÑA 3: TIENDA */}
         {activeTab === 'store' && (
-          <div className="animate-tab" style={{ padding: '40px', paddingBottom: '100px', maxWidth: '1000px', margin: '0 auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '20px' }}>
+          <div className="tab-content" style={{ padding: 'var(--space-10)', paddingBottom: '100px', maxWidth: '1000px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 'var(--space-5)' }}>
               <div>
-                <h2 style={{ color: '#cba6f7', margin: 0 }}>Vitrina de Mods</h2>
-                <p style={{ color: '#a6adc8', margin: '5px 0 0 0' }}>Descubre e instala mods para <b>{modpack.packInfo?.loader} {modpack.packInfo?.gameVersion}</b>.</p>
+                <h2 style={{ color: 'var(--accent-secondary)', margin: 0 }}>Vitrina de Mods</h2>
+                <p style={{ color: 'var(--text-secondary)', margin: 'var(--space-1) 0 0 0' }}>Descubre e instala mods para <b>{modpack.packInfo?.loader} {modpack.packInfo?.gameVersion}</b>.</p>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ color: '#a6adc8', fontSize: '14px' }}>Ordenar por:</span>
-                <select value={onlineStore.sortBy} onChange={(e) => onlineStore.setSortBy(e.target.value)} style={{ background: '#181825', color: '#cdd6f4', border: '1px solid #313244', padding: '8px', borderRadius: '6px', outline: 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>Ordenar por:</span>
+                <select value={onlineStore.sortBy} onChange={(e) => onlineStore.setSortBy(e.target.value)} style={{ background: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-default)', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', outline: 'none' }}>
                   <option value="downloads">Mas Descargados</option><option value="relevance">Relevancia</option><option value="updated">Recien Actualizados</option>
                 </select>
                 {onlineStore.apiStatus && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 10px', background: '#0d1a1a', border: '1px solid #cba6f7', borderRadius: '6px', fontSize: '12px' }}>
-                    <span style={{ color: '#a6adc8', fontSize: '11px' }}>APIs:</span>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <div className="api-status">
+                    <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>APIs:</span>
+                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: onlineStore.apiStatusDisplay.modrinth.color }}></span>
+                        <span className="api-status-dot" style={{ background: onlineStore.apiStatusDisplay.modrinth.color }}></span>
                         <span style={{ color: onlineStore.apiStatusDisplay.modrinth.color }}>{onlineStore.apiStatusDisplay.modrinth.label}</span>
                       </span>
-                      <span style={{ color: '#313244' }}>|</span>
+                      <span style={{ color: 'var(--border-default)' }}>|</span>
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: onlineStore.apiStatusDisplay.curseforge.color }}></span>
+                        <span className="api-status-dot" style={{ background: onlineStore.apiStatusDisplay.curseforge.color }}></span>
                         <span style={{ color: onlineStore.apiStatusDisplay.curseforge.color }}>{onlineStore.apiStatusDisplay.curseforge.label}</span>
                       </span>
-                      <button onClick={onlineStore.refreshApiStatus} style={{ background: 'transparent', border: '1px solid #cba6f7', color: '#cba6f7', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '10px', marginLeft: '4px' }} title="Revisar estado">⟳</button>
+                      <button onClick={onlineStore.refreshApiStatus} style={{ background: 'transparent', border: '1px solid var(--accent-secondary)', color: 'var(--accent-secondary)', padding: '2px 6px', borderRadius: 'var(--radius-xs)', cursor: 'pointer', fontSize: '10px', marginLeft: 'var(--space-1)' }} title="Revisar estado">⟳</button>
                     </div>
                   </div>
                 )}
               </div>
             </div>
-            <div style={{ background: '#181825', padding: '15px', borderRadius: '12px', border: '1px solid #313244', marginBottom: '30px' }}>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                <input type="text" placeholder="Buscar por nombre (ej: Create, JEI)..." value={onlineStore.onlineSearchQuery} onChange={(e) => onlineStore.setOnlineSearchQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onlineStore.handleSearchOnline()} style={{ flex: 1, padding: '12px 14px', borderRadius: '10px', border: '1px solid #3a3a64', background: '#141522', color: '#e8eaff', outline: 'none', fontSize: '15px', transition: 'border 0.2s' }} />
-                <button onClick={onlineStore.handleSearchOnline} disabled={onlineStore.isSearchingOnline} style={{ background: '#cba6f7', color: '#11111b', border: 'none', padding: '0 25px', borderRadius: '8px', fontWeight: 'bold', cursor: onlineStore.isSearchingOnline ? 'wait' : 'pointer' }}>
+            <div style={{ background: 'var(--bg-surface)', padding: 'var(--space-4)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)', marginBottom: 'var(--space-8)' }}>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', marginBottom: 'var(--space-4)' }}>
+                <input type="text" placeholder="Buscar por nombre (ej: Create, JEI)..." value={onlineStore.onlineSearchQuery} onChange={(e) => onlineStore.setOnlineSearchQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onlineStore.handleSearchOnline()} style={{ flex: 1, padding: 'var(--space-3) var(--space-4)', borderRadius: 'var(--radius-lg)', border: '1px solid #3a3a64', background: '#141522', color: '#e8eaff', outline: 'none', fontSize: 'var(--text-md)', transition: 'border var(--duration-fast) var(--ease-out)' }} />
+                <button onClick={onlineStore.handleSearchOnline} disabled={onlineStore.isSearchingOnline} className="btn btn-secondary" style={{ background: 'var(--accent-secondary)', color: 'var(--text-inverse)', cursor: onlineStore.isSearchingOnline ? 'wait' : 'pointer' }}>
                   {onlineStore.isSearchingOnline ? 'Buscando...' : 'Buscar'}
                 </button>
               </div>
-              <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '5px' }}>
+              <div className="category-filters">
                 {[{ id: '', label: 'Todos' }, { id: 'optimization', label: 'Optimización' }, { id: 'technology', label: 'Tecnología' }, { id: 'magic', label: 'Magia' }, { id: 'adventure', label: 'Aventura' }, { id: 'worldgen', label: 'Generación' }, { id: 'decoration', label: 'Decoración' }, { id: 'storage', label: 'Almacenamiento' }].map(cat => (
-                  <button key={cat.id} onClick={() => onlineStore.setModCategory(cat.id)} style={{ background: onlineStore.modCategory === cat.id ? '#89b4fa' : '#11111b', color: onlineStore.modCategory === cat.id ? '#11111b' : '#a6adc8', border: '1px solid', borderColor: onlineStore.modCategory === cat.id ? '#89b4fa' : '#313244', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 0.2s' }}>
+                  <button key={cat.id} onClick={() => onlineStore.setModCategory(cat.id)} className={`category-chip ${onlineStore.modCategory === cat.id ? 'active' : ''}`}>
                     {cat.label}
                   </button>
                 ))}
               </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              {onlineStore.onlineResults.slice(0, onlineStore.visibleOnlineCount).map((mod) => (
-                <div key={mod.project_id} style={{ background: '#181825', border: '1px solid #313244', borderRadius: '12px', padding: '20px', display: 'flex', gap: '20px', alignItems: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.3)', cursor: 'pointer' }} onClick={() => { onlineStore.setSelectedMod(mod); onlineStore.setShowDetails(true); }}>
-                  <div style={{ width: '80px', height: '80px', background: '#11111b', borderRadius: '10px', overflow: 'hidden', flexShrink: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    {mod.icon_url ? <img src={mod.icon_url} alt={mod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '30px' }}>[MOD]</span>}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '5px' }}>
-                      <h3 style={{ margin: 0, color: '#cdd6f4', fontSize: '20px' }}>{mod.title}</h3>
-                      <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: mod.source === 'modrinth' ? '#a6e3a1' : '#f9e2af', color: '#11111b', fontWeight: 'bold' }}>{mod.source ? mod.source.toUpperCase() : 'MODRINTH'}</span>
-                    </div>
-                    <p style={{ margin: '0 0 10px 0', color: '#a6adc8', fontSize: '14px', lineHeight: '1.4' }}>{mod.description}</p>
-                    <div style={{ display: 'flex', gap: '15px', fontSize: '12px', color: '#6c7086' }}>
-                      <span>Autor: {mod.author}</span>
-                      <span>Descargas: {mod.downloads.toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); onlineStore.handleSelectModVersions(mod.project_id, mod.title, mod.source); }} disabled={onlineStore.downloadingMods[mod.project_id]} style={{ background: onlineStore.downloadingMods[mod.project_id] ? '#f9e2af' : '#a6e3a1', color: '#11111b', border: 'none', padding: '12px 25px', borderRadius: '8px', fontWeight: 'bold', cursor: onlineStore.downloadingMods[mod.project_id] ? 'wait' : 'pointer', transition: 'all 0.2s', minWidth: '140px' }}>
-                    {onlineStore.downloadingMods[mod.project_id] ? 'Descargando...' : 'Instalar'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+              {!modpack.packInfo ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-10)' }}>
+                  <div style={{ fontSize: '48px', marginBottom: 'var(--space-4)' }}>[TIENDA]</div>
+                  <p style={{ fontSize: 'var(--text-lg)', marginBottom: 'var(--space-2)' }}>Primero cargá un modpack para buscar mods.</p>
+                  <button onClick={modpack.handleScanFolder} className="btn btn-secondary" style={{ background: 'var(--accent-secondary)', color: 'var(--text-inverse)', marginTop: 'var(--space-3)' }}>
+                    <FolderOpen size={16} /> Cargar Modpack
                   </button>
                 </div>
-              ))}
+              ) : onlineStore.isSearchingOnline ? (
+                <>
+                  {[1,2,3,4].map(i => (
+                    <div key={i} style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xl)', padding: 'var(--space-5)', display: 'flex', gap: 'var(--space-5)', alignItems: 'center' }}>
+                      <div className="skeleton skeleton-avatar"></div>
+                      <div style={{ flex: 1 }}>
+                        <div className="skeleton skeleton-title"></div>
+                        <div className="skeleton skeleton-text" style={{ width: '90%' }}></div>
+                        <div className="skeleton skeleton-text" style={{ width: '40%' }}></div>
+                      </div>
+                      <div className="skeleton" style={{ width: '120px', height: '40px', borderRadius: 'var(--radius-md)' }}></div>
+                    </div>
+                  ))}
+                </>
+              ) : onlineStore.onlineResults.length === 0 && onlineStore.hasSearched ? (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-10)' }}>
+                  <div style={{ fontSize: '48px', marginBottom: 'var(--space-4)' }}>[BÚSQUEDA]</div>
+                  <p style={{ fontSize: 'var(--text-lg)' }}>Sin resultados. Probá con otro término.</p>
+                </div>
+              ) : (
+                onlineStore.onlineResults.slice(0, onlineStore.visibleOnlineCount).map((mod) => (
+                  <div key={mod.project_id} className="mod-card interactive-row hover-lift" onClick={() => { onlineStore.setSelectedMod(mod); onlineStore.setShowDetails(true); }}>
+                    <div className="mod-card-icon">
+                      {mod.icon_url ? <img src={mod.icon_url} alt={mod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>[MOD]</span>}
+                    </div>
+                    <div className="mod-card-info">
+                      <div className="mod-card-title">
+                        <h3>{mod.title}</h3>
+                        <span className={`mod-card-source ${mod.source || 'modrinth'}`}>{mod.source ? mod.source.toUpperCase() : 'MODRINTH'}</span>
+                      </div>
+                      <p className="mod-card-desc">{mod.description}</p>
+                      <div className="mod-card-meta">
+                        <span>Autor: {mod.author}</span>
+                        <span>Descargas: {mod.downloads.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); onlineStore.handleSelectModVersions(mod.project_id, mod.title, mod.source); }} disabled={onlineStore.downloadingMods[mod.project_id]} className="btn btn-success" style={{ minWidth: '120px', cursor: onlineStore.downloadingMods[mod.project_id] ? 'wait' : 'pointer' }}>
+                      {onlineStore.downloadingMods[mod.project_id] ? 'Descargando...' : 'Instalar'}
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
-            {onlineStore.visibleOnlineCount < onlineStore.onlineResults.length && (
-              <div style={{ textAlign: 'center', marginTop: 12 }}>
-                <button onClick={() => onlineStore.setVisibleOnlineCount(v => Math.min(v + 20, onlineStore.onlineResults.length))} style={{ background: '#89b4fa', color: '#11111b', border: 'none', padding: '10px 18px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Cargar más resultados</button>
+            {!onlineStore.isSearchingOnline && onlineStore.visibleOnlineCount < onlineStore.onlineResults.length && (
+              <div style={{ textAlign: 'center', marginTop: 'var(--space-4)' }}>
+                <button onClick={() => onlineStore.setVisibleOnlineCount(v => Math.min(v + 20, onlineStore.onlineResults.length))} className="btn btn-secondary" style={{ background: '#89b4fa', color: '#11111b' }}>
+                  <ChevronRight size={15} /> Cargar más resultados
+                </button>
               </div>
             )}
           </div>
@@ -672,40 +761,40 @@ export default function App() {
 
         {/* PESTAÑA 4: TWEAKS */}
         {activeTab === 'tweaks' && (
-          <div className="animate-tab" style={{ display: 'flex', height: 'calc(100vh - 112px)', width: '100%' }}>
-            <div style={{ width: '250px', background: '#181825', borderRight: '1px solid #313244', padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <h3 style={{ color: '#f5c2e7', margin: '0 0 15px 0' }}>Módulos de Inyección</h3>
-              <button onClick={() => tweaks.setActiveTweakTab('items')} style={{ background: tweaks.activeTweakTab === 'items' ? '#313244' : 'transparent', color: tweaks.activeTweakTab === 'items' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: tweaks.activeTweakTab === 'items' ? '4px solid #f5c2e7' : '4px solid transparent' }}>Ajuste de Items</button>
-              <button onClick={() => tweaks.setActiveTweakTab('entities')} style={{ background: tweaks.activeTweakTab === 'entities' ? '#313244' : 'transparent', color: tweaks.activeTweakTab === 'entities' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: tweaks.activeTweakTab === 'entities' ? '4px solid #a6e3a1' : '4px solid transparent' }}>Mutador Genetico</button>
-              <button onClick={() => tweaks.setActiveTweakTab('spawn')} style={{ background: tweaks.activeTweakTab === 'spawn' ? '#313244' : 'transparent', color: tweaks.activeTweakTab === 'spawn' ? '#cdd6f4' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: tweaks.activeTweakTab === 'spawn' ? '4px solid #8ef29a' : '4px solid transparent' }}>Control de Spawns</button>
-              <button onClick={() => tweaks.setActiveTweakTab('optimizer')} style={{ background: tweaks.activeTweakTab === 'optimizer' ? '#313244' : 'transparent', color: tweaks.activeTweakTab === 'optimizer' ? '#f38ba8' : '#6c7086', border: 'none', padding: '12px', textAlign: 'left', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', borderLeft: tweaks.activeTweakTab === 'optimizer' ? '4px solid #f38ba8' : '4px solid transparent' }}>Optimizador</button>
+          <div className="tab-content" style={{ display: 'flex', height: 'calc(100vh - 112px)', width: '100%' }}>
+            <div className="tweak-sidebar">
+              <h3>Módulos de Inyección</h3>
+              <button onClick={() => tweaks.setActiveTweakTab('items')} className={`tweak-nav-item ${tweaks.activeTweakTab === 'items' ? 'active' : ''}`} style={{ color: tweaks.activeTweakTab === 'items' ? '#cdd6f4' : 'var(--text-muted)', borderLeftColor: tweaks.activeTweakTab === 'items' ? '#f5c2e7' : 'transparent' }}>Ajuste de Items</button>
+              <button onClick={() => tweaks.setActiveTweakTab('entities')} className={`tweak-nav-item ${tweaks.activeTweakTab === 'entities' ? 'active' : ''}`} style={{ color: tweaks.activeTweakTab === 'entities' ? '#cdd6f4' : 'var(--text-muted)', borderLeftColor: tweaks.activeTweakTab === 'entities' ? '#a6e3a1' : 'transparent' }}>Mutador Genetico</button>
+              <button onClick={() => tweaks.setActiveTweakTab('spawn')} className={`tweak-nav-item ${tweaks.activeTweakTab === 'spawn' ? 'active' : ''}`} style={{ color: tweaks.activeTweakTab === 'spawn' ? '#cdd6f4' : 'var(--text-muted)', borderLeftColor: tweaks.activeTweakTab === 'spawn' ? '#8ef29a' : 'transparent' }}>Control de Spawns</button>
+              <button onClick={() => tweaks.setActiveTweakTab('optimizer')} className={`tweak-nav-item ${tweaks.activeTweakTab === 'optimizer' ? 'active' : ''}`} style={{ color: tweaks.activeTweakTab === 'optimizer' ? '#cdd6f4' : 'var(--text-muted)', borderLeftColor: tweaks.activeTweakTab === 'optimizer' ? '#f38ba8' : 'transparent' }}>Optimizador</button>
             </div>
-            <div style={{ flex: 1, padding: '40px', overflowY: 'auto' }}>
+            <div style={{ flex: 1, padding: 'var(--space-10)', overflowY: 'auto' }}>
               {tweaks.activeTweakTab === 'items' && (
                 <div style={{ maxWidth: '600px' }}>
-                  <h2 style={{ color: '#cdd6f4', marginTop: 0 }}>Modificador de Armas y Armaduras</h2>
-                  <p style={{ color: '#a6adc8', marginBottom: '30px' }}>Inyecta código KubeJS para sobrescribir las estadísticas base de cualquier objeto en el juego.</p>
-                  <p style={{ color: '#a6e3a1', fontSize: '13px', marginTop: '-20px', marginBottom: '20px' }}>Base de datos activa: {modpack.availableIds.length} objetos detectados.</p>
-                  <div style={{ background: '#181825', padding: '25px', borderRadius: '12px', border: '1px solid #313244', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                    <div>
-                      <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>ID del Objeto (mod:item)</label>
-                      <AutocompleteInput placeholder="Ej: minecraft:diamond_chestplate" value={tweaks.itemTweakData.itemId} availableIds={modpack.availableIds} colorClass="#a6e3a1" onChange={(val) => tweaks.setItemTweakData({ ...tweaks.itemTweakData, itemId: val })} />
+                  <h2 style={{ color: 'var(--text-primary)', marginTop: 0 }}>Modificador de Armas y Armaduras</h2>
+                  <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-8)' }}>Inyecta código KubeJS para sobrescribir las estadísticas base de cualquier objeto en el juego.</p>
+                  <p style={{ color: 'var(--accent-success)', fontSize: 'var(--text-sm)', marginTop: 'calc(var(--space-5) * -1)', marginBottom: 'var(--space-5)' }}>Base de datos activa: {modpack.availableIds.length} objetos detectados.</p>
+                  <div style={{ background: 'var(--bg-surface)', padding: 'var(--space-6)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
+                    <div className="form-group">
+                      <label className="form-label">ID del Objeto (mod:item)</label>
+                      <AutocompleteInput placeholder="Ej: minecraft:diamond_chestplate" value={tweaks.itemTweakData.itemId} availableIds={modpack.availableIds} colorClass="var(--accent-success)" onChange={(val) => tweaks.setItemTweakData({ ...tweaks.itemTweakData, itemId: val })} />
                     </div>
-                    <div style={{ display: 'flex', gap: '15px' }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Daño de Ataque</label>
-                        <input type="number" step="0.5" placeholder="Ej: 12.5" value={tweaks.itemTweakData.damage} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, damage: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#f38ba8', outline: 'none' }} />
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">Daño de Ataque</label>
+                        <input type="number" step="0.5" placeholder="Ej: 12.5" value={tweaks.itemTweakData.damage} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, damage: e.target.value })} className="input" style={{ color: 'var(--accent-error)' }} />
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Puntos de Armadura</label>
-                        <input type="number" placeholder="Ej: 8" value={tweaks.itemTweakData.armor} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, armor: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#89b4fa', outline: 'none' }} />
+                      <div className="form-group">
+                        <label className="form-label">Puntos de Armadura</label>
+                        <input type="number" placeholder="Ej: 8" value={tweaks.itemTweakData.armor} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, armor: e.target.value })} className="input" style={{ color: '#89b4fa' }} />
                       </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ color: '#cdd6f4', fontSize: '13px', fontWeight: 'bold' }}>Dureza (Toughness)</label>
-                        <input type="number" placeholder="Ej: 3" value={tweaks.itemTweakData.toughness} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, toughness: e.target.value })} style={{ width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #313244', background: '#11111b', color: '#f9e2af', outline: 'none' }} />
+                      <div className="form-group">
+                        <label className="form-label">Dureza (Toughness)</label>
+                        <input type="number" placeholder="Ej: 3" value={tweaks.itemTweakData.toughness} onChange={e => tweaks.setItemTweakData({ ...tweaks.itemTweakData, toughness: e.target.value })} className="input" style={{ color: 'var(--accent-warning)' }} />
                       </div>
                     </div>
-                    <button onClick={tweaks.handleItemTweak} style={{ background: '#f5c2e7', color: '#11111b', border: 'none', padding: '15px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>Inyectar Código de Balance</button>
+                    <button onClick={tweaks.handleItemTweak} className="btn btn-secondary" style={{ background: '#f5c2e7', color: '#11111b', marginTop: 'var(--space-2)' }}>Inyectar Código de Balance</button>
                   </div>
                 </div>
               )}
@@ -841,59 +930,59 @@ export default function App() {
 
         {/* PESTAÑA 5: RENDIMIENTO */}
         {activeTab === 'performance' && (
-          <div className="animate-tab" style={{ padding: '40px', maxWidth: '900px', margin: '0 auto', paddingBottom: '100px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+          <div className="tab-content" style={{ padding: 'var(--space-10)', maxWidth: '900px', margin: '0 auto', paddingBottom: '100px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-8)' }}>
               <div>
                 <h2 style={{ color: '#fab387', margin: 0, fontSize: '28px' }}>Monitor de Rendimiento</h2>
-                <p style={{ color: '#a6adc8', marginTop: '5px' }}>Análisis heurístico de carga para <b>{modpack.packInfo?.name || 'tu modpack'}</b>.</p>
+                <p style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>Análisis heurístico de carga para <b>{modpack.packInfo?.name || 'tu modpack'}</b>.</p>
               </div>
             </div>
-            <div style={{ background: '#181825', borderRadius: '12px', border: '1px solid #313244', padding: '20px', marginBottom: '30px', display: 'flex', gap: '20px' }}>
-              <div style={{ flex: 1, background: '#11111b', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #89b4fa' }}>
-                <div style={{ color: '#a6adc8', fontSize: '12px', fontWeight: 'bold' }}>PROCESADOR (CPU)</div>
-                <div style={{ color: '#cdd6f4', fontSize: '16px', marginTop: '5px' }}>{performance.hardwareSpecs?.cpu ? `${performance.hardwareSpecs.cpu.manufacturer} ${performance.hardwareSpecs.cpu.brand}` : 'Escaneando...'}</div>
-                <div style={{ color: '#6c7086', fontSize: '12px' }}>{performance.hardwareSpecs?.cpu?.logicalCores} Hilos Lógicos</div>
+            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-subtle)', padding: 'var(--space-5)', marginBottom: 'var(--space-8)', display: 'flex', gap: 'var(--space-5)' }}>
+              <div className="stat-card accent-primary">
+                <div className="topbar-label" style={{ marginBottom: 'var(--space-2)' }}>PROCESADOR (CPU)</div>
+                <div style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)', marginTop: 'var(--space-1)' }}>{performance.hardwareSpecs?.cpu ? `${performance.hardwareSpecs.cpu.manufacturer} ${performance.hardwareSpecs.cpu.brand}` : 'Escaneando...'}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{performance.hardwareSpecs?.cpu?.logicalCores} Hilos Lógicos</div>
               </div>
-              <div style={{ flex: 1, background: '#11111b', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #a6e3a1' }}>
-                <div style={{ color: '#a6adc8', fontSize: '12px', fontWeight: 'bold' }}>MEMORIA (RAM)</div>
-                <div style={{ color: '#cdd6f4', fontSize: '20px', marginTop: '5px' }}>{performance.hardwareSpecs?.ram ? `${performance.hardwareSpecs.ram.totalGB} GB Total` : 'Escaneando...'}</div>
-                <div style={{ color: '#6c7086', fontSize: '12px' }}>{performance.hardwareSpecs?.ram ? `${performance.hardwareSpecs.ram.availableGB} GB Libres` : ''}</div>
+              <div className="stat-card accent-success">
+                <div className="topbar-label" style={{ marginBottom: 'var(--space-2)' }}>MEMORIA (RAM)</div>
+                <div style={{ color: 'var(--text-primary)', fontSize: 'var(--text-xl)', marginTop: 'var(--space-1)' }}>{performance.hardwareSpecs?.ram ? `${performance.hardwareSpecs.ram.totalGB} GB Total` : 'Escaneando...'}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{performance.hardwareSpecs?.ram ? `${performance.hardwareSpecs.ram.availableGB} GB Libres` : ''}</div>
               </div>
-              <div style={{ flex: 1, background: '#11111b', padding: '15px', borderRadius: '8px', borderLeft: '4px solid #f38ba8' }}>
-                <div style={{ color: '#a6adc8', fontSize: '12px', fontWeight: 'bold' }}>GRÁFICOS (GPU)</div>
-                <div style={{ color: '#cdd6f4', fontSize: '16px', marginTop: '5px' }}>{performance.hardwareSpecs?.gpu ? `${performance.hardwareSpecs.gpu.vendor} ${performance.hardwareSpecs.gpu.model}` : 'Buscando Dedicada...'}</div>
-                <div style={{ color: '#6c7086', fontSize: '12px' }}>{performance.hardwareSpecs?.gpu ? `${performance.hardwareSpecs.gpu.vramGB} GB VRAM` : ''}</div>
+              <div className="stat-card accent-error">
+                <div className="topbar-label" style={{ marginBottom: 'var(--space-2)' }}>GRÁFICOS (GPU)</div>
+                <div style={{ color: 'var(--text-primary)', fontSize: 'var(--text-md)', marginTop: 'var(--space-1)' }}>{performance.hardwareSpecs?.gpu ? `${performance.hardwareSpecs.gpu.vendor} ${performance.hardwareSpecs.gpu.model}` : 'Buscando Dedicada...'}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{performance.hardwareSpecs?.gpu ? `${performance.hardwareSpecs.gpu.vramGB} GB VRAM` : ''}</div>
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ color: '#cdd6f4', margin: 0 }}>Lista de Módulos Instalados ({performance.modsOrdenados.length})</h3>
-              <button data-tooltip="Analiza el peso de cada mod según su tamaño, tipo y cantidad de archivos de configuración. Los mods de optimización reducen la carga." onClick={handleCalculateImpact} disabled={performance.isCalculatingImpact || performance.modsOrdenados.length === 0} style={{ background: performance.isCalculatingImpact ? '#f9e2af' : '#fab387', color: '#11111b', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: performance.isCalculatingImpact ? 'wait' : 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+              <h3 style={{ color: 'var(--text-primary)', margin: 0 }}>Lista de Módulos Instalados ({performance.modsOrdenados.length})</h3>
+              <button data-tooltip="Analiza el peso de cada mod según su tamaño, tipo y cantidad de archivos de configuración." onClick={handleCalculateImpact} disabled={performance.isCalculatingImpact || performance.modsOrdenados.length === 0} className="btn btn-warning" style={{ cursor: performance.isCalculatingImpact ? 'wait' : 'pointer' }}>
                 {performance.isCalculatingImpact ? 'Analizando Archivos...' : 'Calcular Peso Heurístico'}
               </button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
               {performance.modsOrdenados.map((mod, i) => {
                 const { hasImpact, isOpt, color, barWidth } = performance.modImpactStyles[i] || {};
                 return (
-                  <div key={i} style={{ background: '#181825', padding: '15px 20px', borderRadius: '10px', border: '1px solid #313244', display: 'flex', alignItems: 'center', gap: '20px' }}>
+                  <div key={i} style={{ background: 'var(--bg-surface)', padding: 'var(--space-4) var(--space-5)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 'var(--space-5)' }}>
                     <div style={{ width: '250px', flexShrink: 0 }}>
-                      <div style={{ color: '#cdd6f4', fontWeight: 'bold', fontSize: '15px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mod.label}</div>
-                      <div style={{ color: '#6c7086', fontSize: '12px' }}>{!hasImpact ? 'Pendiente de cálculo' : (isOpt ? 'Módulo de Optimización' : 'Módulo de Contenido')}</div>
+                      <div style={{ color: 'var(--text-primary)', fontWeight: 'bold', fontSize: 'var(--text-md)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mod.label}</div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>{!hasImpact ? 'Pendiente de cálculo' : (isOpt ? 'Módulo de Optimización' : 'Módulo de Contenido')}</div>
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '12px' }}>
-                        <span style={{ color: '#a6adc8' }}>Impacto Proyectado</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-1)', fontSize: 'var(--text-xs)' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Impacto Proyectado</span>
                         <span style={{ color, fontWeight: 'bold' }}>{!hasImpact ? '-- pts' : (isOpt ? 'REDUCE CARGA' : `${mod.impact} pts`)}</span>
                       </div>
-                      <div style={{ width: '100%', height: '8px', background: '#11111b', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{ width: `${barWidth}%`, height: '100%', background: isOpt ? 'linear-gradient(90deg, #11111b, #a6e3a1)' : color, borderRadius: '4px', transition: 'width 0.5s ease-out' }} />
+                      <div className="progress-bar">
+                        <div className="progress-bar-fill" style={{ width: `${barWidth}%`, background: isOpt ? 'linear-gradient(90deg, var(--bg-surface), var(--accent-success))' : color }} />
                       </div>
                     </div>
                   </div>
                 );
               })}
               {performance.modsOrdenados.length === 0 && (
-                <div style={{ textAlign: 'center', color: '#6c7086', padding: '40px' }}>No hay mods cargados en el ecosistema.</div>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 'var(--space-10)' }}>No hay mods cargados en el ecosistema.</div>
               )}
             </div>
           </div>
@@ -901,29 +990,76 @@ export default function App() {
 
         {/* PESTAÑA 6: EDITOR IDE */}
         {activeTab === 'ide' && (
-          <div className="animate-tab" style={{ width: '100%', height: 'calc(100vh - 112px)' }}>
+          <div className="tab-content" style={{ width: '100%', height: 'calc(100vh - 112px)' }}>
             <ScriptEditor packPath={modpack.packInfo?.path} />
           </div>
         )}
 
       </div>
 
+      {/* ATAJOS DE TECLADO */}
+      {showShortcuts && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(17, 17, 27, 0.85)', backdropFilter: 'blur(6px)', display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowShortcuts(false)}>
+          <div className="animate-modal" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-2xl)', width: '580px', maxHeight: '80vh', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.7)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ padding: 'var(--space-5) var(--space-6)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+                <div style={{ background: 'var(--accent-secondary)', color: 'var(--text-inverse)', width: '32px', height: '32px', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Sparkles size={18} />
+                </div>
+                <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', color: 'var(--text-primary)' }}>Atajos de Teclado</h2>
+              </div>
+              <button onClick={() => setShowShortcuts(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '20px' }}>x</button>
+            </div>
+            <div style={{ padding: 'var(--space-5) var(--space-6)', overflowY: 'auto', maxHeight: 'calc(80vh - 70px)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-4)' }}>
+              <div>
+                <h4 style={{ color: 'var(--accent-secondary)', margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>General</h4>
+                <ShortcutRow keys="Ctrl+K" desc="Mostrar/Ocultar ayuda de atajos" />
+                <ShortcutRow keys="Ctrl+O" desc="Abrir carpeta de modpack" />
+                <ShortcutRow keys="Ctrl+E" desc="Exportar modpack a ZIP" />
+                <ShortcutRow keys="Ctrl+S" desc="Guardar archivo de configuración" />
+                <ShortcutRow keys="Esc" desc="Cerrar modal / Cancelar" />
+              </div>
+              <div>
+                <h4 style={{ color: 'var(--accent-secondary)', margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Navegación</h4>
+                <ShortcutRow keys="1-6" desc="Ir a pestaña (Ecosistema, Config, Tienda...)" />
+                <ShortcutRow keys="Ctrl+F" desc="Buscar en lista de archivos" />
+                <ShortcutRow keys="Tab" desc="Siguiente campo de entrada" />
+              </div>
+              <div>
+                <h4 style={{ color: 'var(--accent-secondary)', margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Grafo de Mods</h4>
+                <ShortcutRow keys="Scroll" desc="Zoom in/out" />
+                <ShortcutRow keys="Click + Arrastrar" desc="Mover el grafo" />
+                <ShortcutRow keys="Doble Click" desc="Abrir contenido del mod" />
+              </div>
+              <div>
+                <h4 style={{ color: 'var(--accent-secondary)', margin: '0 0 var(--space-3) 0', fontSize: 'var(--text-sm)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tienda</h4>
+                <ShortcutRow keys="Enter" desc="Buscar en la tienda" />
+                <ShortcutRow keys="Click en resultado" desc="Ver detalles del mod" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TOAST */}
       {toast && toast.show && (
-        <div className="toast-enter" style={{
+        <div style={{
           position: 'fixed', bottom: '30px', right: '30px', zIndex: 9999,
           background: toast.type === 'success' ? 'linear-gradient(135deg, #a6e3a1 0%, #40a02b 100%)' :
             toast.type === 'loading' ? 'linear-gradient(135deg, #89b4fa 0%, #1e66f5 100%)' :
               'linear-gradient(135deg, #f38ba8 0%, #d20f39 100%)',
           color: '#11111b', padding: '18px 24px', borderRadius: '14px',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: '15px'
+          boxShadow: '0 10px 40px rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', gap: '15px',
+          animation: 'slide-in-right 0.5s var(--ease-out)'
         }}>
-          <span style={{ fontSize: '28px', filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.3))' }}>
-            {toast.type === 'success' ? '[OK]' : toast.type === 'loading' ? '[...]' : '[ERR]'}
+          <span className="toast-icon">
+            {toast.type === 'success' ? <CheckCircle size={28} /> :
+             toast.type === 'loading' ? <Loader2 size={28} className="spin" /> :
+             <AlertTriangle size={28} />}
           </span>
           <div>
-            <div style={{ fontSize: '16px', fontWeight: '900', letterSpacing: '0.5px' }}>{toast.title}</div>
-            <div style={{ fontSize: '13px', fontWeight: '600', opacity: 0.9, marginTop: '2px' }}>{toast.message}</div>
+            <div className="toast-title">{toast.title}</div>
+            <div className="toast-message">{toast.message}</div>
           </div>
         </div>
       )}

@@ -9,10 +9,6 @@ html, body, #root {
   color: #f8f9fa;
 }
 
-button {
-  transition: all 0.15s ease-out;
-}
-
 button:active:not(:disabled) {
   transform: scale(0.97);
 }
@@ -36,20 +32,6 @@ textarea:focus {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-
-@keyframes fadeSlideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.skeleton-shimmer {
-  animation: skeleton-shimmer 1.5s infinite;
-}
-
-@keyframes skeleton-shimmer {
-  0% { left: -100%; }
-  100% { left: 100%; }
 }
 
 @keyframes ripple {
@@ -81,36 +63,12 @@ textarea:focus {
   height: 100vh;
 }
 
-[data-tooltip] {
-  position: relative;
-  cursor: help;
+.main-content {
+  flex: 70%;
 }
 
-[data-tooltip]:hover::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: #1e1e2e;
-  color: #cdd6f4;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.4;
-  white-space: pre-line;
-  max-width: 280px;
-  z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-  border: 1px solid #313244;
-  pointer-events: none;
-}
-.main-content {
-  flex: 70%; /* El 70% de la pantalla para tus mods/archivos */
-}
-  /* Paleta Cyberpunk Neon: Base #0d0f12 | Superficies #1a1d24 | Marca #00e5ff | Texto #f8f9fa | Secundario #9ca3af */
 .sidebar-bot {
-  flex: 30%; /* El 30% para tu Asistente Copilot */
+  flex: 30%;
   border-left: 1px solid #2a2e36;
-  background-color: #1a1d24; /* Superficies */
+  background-color: #1a1d24;
 }

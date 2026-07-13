@@ -10,8 +10,8 @@
     "build:react": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "electron .",
-    "start": "concurrently \"npm run dev\" \"npm run electron\"",
+    "electron": "cross-env NODE_ENV=development electron .",
+    "start": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && npm run electron\"",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "build:exe": "npm run build && electron-builder --win --x64"
@@ -31,10 +31,12 @@
     "@electron/fuses": "^1.8.0",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
     "electron": "41.1.1",
     "electron-builder": "^26.15.3",
     "rollup-plugin-visualizer": "^7.0.1",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "wait-on": "^9.0.10"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
@@ -43,7 +45,7 @@
     "bottleneck": "^2.19.5",
     "dotenv": "^17.4.2",
     "electron-squirrel-startup": "^1.0.1",
-    "lucide-react": "^1.7.0",
+    "lucide-react": "^1.23.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "reactflow": "^11.11.4",

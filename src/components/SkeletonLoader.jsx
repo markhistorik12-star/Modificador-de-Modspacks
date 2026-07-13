@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 const shimmerStyle = {
   position: 'absolute',
@@ -152,4 +152,4 @@ const SkeletonLoader = ({
   }
 };
 
-export default SkeletonLoader;
+export default memo(SkeletonLoader);
