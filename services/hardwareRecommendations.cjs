@@ -21,15 +21,6 @@ const HARDWARE_TIERS = {
   }
 };
 
-function classifyTier(value, tiers) {
-  for (const [tier, limits] of Object.entries(tiers)) {
-    if (value <= limits.maxCores || value <= limits.maxThreads || value <= limits.maxGB || value <= limits.maxVRAM) {
-      return tier;
-    }
-  }
-  return 'extreme';
-}
-
 function getCPUTier(cpu) {
   const threads = cpu.logicalCores || cpu.cores || 4;
   if (threads <= 4) return 'low';
@@ -55,54 +46,55 @@ function getGPUTier(gpu) {
   return 'extreme';
 }
 
+// El rendimiento real en Minecraft queda limitado por el componente mas debil (cuello de botella)
 function getOverallTier(cpuTier, ramTier, gpuTier) {
   const tierOrder = { low: 0, mid: 1, high: 2, extreme: 3 };
-  const maxTier = Math.max(
-    tierOrder[cpuTier] || 0,
-    tierOrder[ramTier] || 0,
-    tierOrder[gpuTier] || 0
+  const minTier = Math.min(
+    tierOrder[cpuTier] ?? 1,
+    tierOrder[ramTier] ?? 1,
+    tierOrder[gpuTier] ?? 0
   );
-  return Object.keys(tierOrder).find(k => tierOrder[k] === maxTier) || 'mid';
+  return Object.keys(tierOrder).find(k => tierOrder[k] === minTier) || 'mid';
 }
 
 const RECOMMENDATION_RULES = {
   low: {
     profile: 'heavy-modpack',
-    reason: 'Hardware limitado - se requieren optimizaciones agresivas',
+    reason: 'Hardware limitado: se recomiendan optimizaciones agresivas',
     categories: ['gpu_vram', 'cpu_maps', 'cpu_entities', 'engine_system', 'memory'],
     priority: 'critical',
     warnings: [
       'Se recomienda cerrar otras aplicaciones mientras juegas',
-      'Considera asignar más RAM a Java (-Xmx4G mínimo)'
+      'Considera asignar al menos 4 GB de RAM a Java (-Xmx4G)'
     ]
   },
   mid: {
     profile: 'heavy-modpack',
-    reason: 'Hardware medio - optimizaciones balanceadas',
+    reason: 'Hardware medio: optimizaciones equilibradas',
     categories: ['gpu_vram', 'cpu_maps', 'cpu_entities', 'engine_system'],
     priority: 'recommended',
     warnings: [
-      'Buen equilibrio entre calidad y rendimiento'
+      'Buen equilibrio entre calidad visual y rendimiento'
     ]
   },
   high: {
     profile: 'default',
-    reason: 'Hardware potente - optimizaciones ligeras',
+    reason: 'Hardware potente: optimizaciones ligeras',
     categories: ['gpu_vram', 'cpu_entities', 'engine_system'],
     priority: 'optional',
     warnings: [
-      'Puedes permitirte calidad gráfica alta',
+      'Puedes mantener calidad grafica alta',
       'Las optimizaciones son opcionales'
     ]
   },
   extreme: {
     profile: 'default',
-    reason: 'Hardware de alta gama - optimizaciones mínimas',
+    reason: 'Hardware de gama alta: optimizaciones minimas',
     categories: ['engine_system'],
     priority: 'optional',
     warnings: [
-      'Hardware sobrado para cualquier modpack',
-      'Enfócate en calidad visual sobre rendimiento'
+      'Hardware holgado para modpacks pesados',
+      'Prioriza calidad visual sobre recortes graficos'
     ]
   }
 };
@@ -137,8 +129,7 @@ async function getHardwareOptimizationProfile(hardware) {
   const recommendation = generateRecommendation(hardware);
   const loader = getOptimizationLoader();
   await loader.loadConfigs();
-  
-  const profile = loader.getConfig(recommendation.profile);
+
   const availableCategories = Object.keys(loader.getCategories());
 
   return {
@@ -151,14 +142,14 @@ async function getHardwareOptimizationProfile(hardware) {
 
 function getCategoryDescriptions() {
   return {
-    gpu_vram: 'Reduce uso de VRAM (texturas, shaders, fog, mipmaps)',
-    cpu_maps: 'Optimiza minimapas y mapas (actualización chunks, entidades)',
-    cpu_entities: 'Reduce carga de entidades (culling, límites de spawn)',
-    engine_system: 'Optimiza motor del juego (partículas, red, chunks)',
-    memory: 'Gestión de memoria (GC, modernfix, smoothboot)',
+    gpu_vram: 'Reduce uso de VRAM (texturas, shaders, niebla, mipmaps)',
+    cpu_maps: 'Optimiza minimapas y mapas (actualizacion de chunks, entidades)',
+    cpu_entities: 'Reduce carga de entidades (culling, limites de spawn)',
+    engine_system: 'Optimiza motor del juego (particulas, red, chunks)',
+    memory: 'Gestion de memoria (GC, modernfix, smoothboot)',
     server_performance: 'Rendimiento servidor (TPS, entity activation)',
     server_entities: 'Entidades en servidor (view distance, mob caps)',
-    server_network: 'Red servidor (compresión, keepalive)'
+    server_network: 'Red servidor (compresion, keepalive)'
   };
 }
 

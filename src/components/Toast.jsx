@@ -1,38 +1,5 @@
-import { useState, useCallback, useRef, useEffect, memo } from 'react';
+import { memo } from 'react';
 import { Check, X, Info, AlertTriangle } from 'lucide-react';
-
-let toastIdCounter = 0;
-
-export function useToast() {
-  const [toasts, setToasts] = useState([]);
-  const timersRef = useRef({});
-  const progressRef = useRef({});
-
-  const removeToast = useCallback((id) => {
-    clearTimeout(timersRef.current[id]);
-    clearInterval(progressRef.current[id]);
-    delete timersRef.current[id];
-    delete progressRef.current[id];
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
-
-  const showToast = useCallback((title, message, type = 'success', duration = 4000) => {
-    const id = ++toastIdCounter;
-    setToasts(prev => [...prev, { id, title, message, type, progress: 100 }]);
-    
-    const startTime = Date.now();
-    progressRef.current[id] = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.max(0, 100 - (elapsed / duration) * 100);
-      setToasts(prev => prev.map(t => t.id === id ? { ...t, progress } : t));
-    }, 50);
-
-    timersRef.current[id] = setTimeout(() => removeToast(id), duration);
-    return id;
-  }, [removeToast]);
-
-  return { toasts, showToast, removeToast };
-}
 
 const TYPE_STYLES = {
   success: { gradient: 'linear-gradient(135deg, #00e67a 0%, #00b359 100%)', icon: <Check size={18} /> },

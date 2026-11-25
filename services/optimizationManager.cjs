@@ -36,8 +36,10 @@ const OPTIMIZATION_CATEGORIES = {
   },
   cpu_entities: {
     'entityculling.toml': { 'cull_blocks': true, 'cull_entities': true, 'cull_distance': 64 },
+    'entityculling.json': { 'tracePlayers': false, 'skipHiddenEntityRendering': true, 'tickCulling': true },
     'alexsmobs.toml': { 'limit_spawns': true, 'spawn_weight_multiplier': 0.5 },
     'iceandfire.toml': { 'dragon_spawn_distance': 1000, 'dragon_griefing': 0 },
+    'iceandfire-common.toml': { 'GenerateDragonRoosts': true, 'DragonGriefing': 2 },
     'physicsmod.json': { 'mobPhysics': false, 'blockPhysics': false, 'vinePhysics': false, 'itemPhysics': false }
   },
   engine_system: {

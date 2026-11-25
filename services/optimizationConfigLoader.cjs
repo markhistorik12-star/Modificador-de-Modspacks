@@ -24,7 +24,7 @@ class OptimizationConfigLoader {
 
   async loadConfigs(customDir = null) {
     const dir = customDir || this.configDir;
-    const absoluteDir = path.resolve(process.cwd(), dir);
+    const absoluteDir = path.isAbsolute(dir) ? dir : path.resolve(__dirname, '..', dir);
 
     try {
       await fs.mkdir(absoluteDir, { recursive: true });
@@ -204,8 +204,8 @@ class OptimizationConfigLoader {
       throw new Error('ID contains invalid characters. Use only alphanumeric, underscore, and hyphen.');
     }
 
-    const filePath = path.join(this.configDir, `${safeId}.json`);
-    const absoluteDir = path.resolve(process.cwd(), this.configDir);
+    const absoluteDir = path.isAbsolute(this.configDir) ? this.configDir : path.resolve(__dirname, '..', this.configDir);
+    const filePath = path.join(absoluteDir, `${safeId}.json`);
     await fs.mkdir(absoluteDir, { recursive: true });
     await fs.writeFile(filePath, JSON.stringify(config, null, 2), 'utf-8');
 

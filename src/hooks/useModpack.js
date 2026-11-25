@@ -10,6 +10,7 @@ export function useModpack() {
   const [rfInstance, setRfInstance] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [availableIds, setAvailableIds] = useState([]);
+  const [modCatalog, setModCatalog] = useState({ items: [], entities: [], chests: [], all: [], hasKubeJS: false });
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectData, setNewProjectData] = useState({ name: '', mcVersion: '1.20.1', loader: 'Forge' });
   const [availableGameVersions, setAvailableGameVersions] = useState([]);
@@ -26,12 +27,35 @@ export function useModpack() {
     setContextMenu({ x: event.clientX, y: event.clientY, node });
   }, []);
 
+  const refreshModIds = useCallback(async (packPath) => {
+    if (!window.electronAPI || !packPath) return;
+    const cleanPath = packPath.replace(/[\\/]mods[\\/]?$/, '');
+    const res = await window.electronAPI.scanModIds(cleanPath + '/mods');
+    if (Array.isArray(res)) {
+      setAvailableIds(res);
+      setModCatalog({ items: res, entities: res, chests: [], all: res, hasKubeJS: false });
+    } else if (res && typeof res === 'object') {
+      const all = Array.isArray(res.all) ? res.all : [];
+      setAvailableIds(all);
+      setModCatalog({
+        items: Array.isArray(res.items) ? res.items : all,
+        entities: Array.isArray(res.entities) ? res.entities : all,
+        chests: Array.isArray(res.chests) ? res.chests : [],
+        all,
+        hasKubeJS: Boolean(res.hasKubeJS),
+      });
+    }
+  }, []);
+
   const processScanResult = useCallback((result) => {
     if (!result) return;
     const { mods, info, rootFiles: filesFromRoot } = result;
     setPackInfo(info);
     setRootFiles(filesFromRoot || []);
-    if (info?.path) localStorage.setItem('lastModpackPath', info.path);
+    if (info?.path) {
+      localStorage.setItem('lastModpackPath', info.path);
+      refreshModIds(info.path);
+    }
 
     const newNodes = [];
     const newEdges = [];
@@ -81,18 +105,18 @@ export function useModpack() {
         newNodes.push({
           id: modId, type: 'mod', position: { x: relX, y: relY }, parentNode: groupId, extent: 'parent',
           data: { label: mod.name, version: mod.version, icon: mod.icon, hasConfigs: mod.configs.length > 0 },
-          style: { zIndex: 1, borderRadius: 12, boxShadow: '0 6px 14px rgba(0,0,0,.25)', background: '#1e1e2e', border: '1px solid #37334a' }
+          style: { zIndex: 1, borderRadius: 12, boxShadow: '0 6px 14px rgba(0,0,0,.25)', background: '#1a1d24', border: '1px solid #2a2e36' }
         });
         mod.configs.forEach((cfg, cIndex) => {
           const cfgId = `cfg-${mod.id}-${cIndex}`;
           newNodes.push({
             id: cfgId, parentNode: modId, extent: 'parent',
-            style: { background: '#94e2d5', color: '#11111b', fontSize: '10px', width: 150, borderRadius: '4px', padding: '4px', border: '1px solid #11111b', zIndex: 2 },
+            style: { background: '#00e67a', color: '#0d0f12', fontSize: '10px', width: 150, borderRadius: '4px', padding: '4px', border: '1px solid #0d0f12', zIndex: 2 },
             position: { x: 20, y: 75 + (cIndex * 35) },
             data: { label: `Config: ${cfg}` }
           });
           newEdges.push({ id: `edge-${modId}-${cfgId}`, source: modId, target: cfgId, animated: true, type: 'smoothstep',
-            style: { stroke: '#94e2d5', strokeWidth: 2, zIndex: 1 } });
+            style: { stroke: '#00e67a', strokeWidth: 2, zIndex: 1 } });
         });
       });
       posX += groupWidth + 100;
@@ -100,16 +124,13 @@ export function useModpack() {
 
     setNodes(newNodes);
     setEdges(newEdges);
-  }, []);
+  }, [refreshModIds]);
 
   const handleScanFolder = useCallback(async () => {
     if (!window.electronAPI) return;
     const result = await window.electronAPI.scanMods();
     if (result?.info) {
       processScanResult(result);
-      const cleanPath = result.info.path.replace(/[\\\/]mods[\\\/]?$/, '');
-      const ids = await window.electronAPI.scanModIds(cleanPath + '/mods');
-      setAvailableIds(ids);
     }
   }, [processScanResult]);
 
@@ -148,11 +169,8 @@ export function useModpack() {
         const result = await window.electronAPI.scanMods(lastPath);
         if (result?.info) {
           processScanResult(result);
-          const cleanPath = result.info.path.replace(/[\\\/]mods[\\\/]?$/, '');
-          const ids = await window.electronAPI.scanModIds(cleanPath + '/mods');
-          setAvailableIds(ids);
         }
-      } catch (e) {
+      } catch {
         localStorage.removeItem('lastModpackPath');
       }
     };
@@ -168,6 +186,8 @@ export function useModpack() {
     rfInstance, setRfInstance,
     contextMenu, setContextMenu,
     availableIds,
+    modCatalog,
+    refreshModIds,
     isCreatingProject, setIsCreatingProject,
     newProjectData, setNewProjectData,
     availableGameVersions,

@@ -43,7 +43,7 @@ async function calculateModImpact(filePath) {
     }
 
     return Math.round(score);
-  } catch (error) {
+  } catch {
     return 20;
   }
 }

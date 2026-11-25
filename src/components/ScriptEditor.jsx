@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Editor from '@monaco-editor/react';
-import { useToast } from './Toast.jsx';
+import { useToastList as useToast } from '../hooks/useToast.js';
 import ToastContainer from './Toast.jsx';
 
 export default function ScriptEditor({ packPath }) {
@@ -13,44 +13,58 @@ export default function ScriptEditor({ packPath }) {
   // 1. Cargar el árbol de archivos al iniciar el componente
   useEffect(() => {
     const loadTree = async () => {
-      // packPath es la ruta del modpack actual que pasamos como prop
-      const response = await window.electronAPI.getScriptsTree(packPath);
-      if (response.success) {
-        setFileTree(response.data);
-      } else {
-        console.error("Error al cargar scripts:", response.message);
+      if (!packPath) return;
+      try {
+        const response = await window.electronAPI.getScriptsTree(packPath);
+        if (response.success) {
+          setFileTree(response.data);
+        } else {
+          console.error("Error al cargar scripts:", response.message);
+        }
+      } catch (err) {
+        console.error("[ScriptEditor] getScriptsTree error:", err);
       }
     };
-    
-    if (packPath) loadTree();
+
+    loadTree();
   }, [packPath]);
 
   // 2. Función para abrir un archivo al hacerle clic
-  const handleFileClick = async (filePath) => {
-    const response = await window.electronAPI.readScript(filePath, packPath);
-    if (response.success) {
-      setCode(response.data);
-      setActiveFile(filePath);
-    } else {
-      showToast("Error", "No se pudo leer el archivo", "error");
+  const handleFileClick = useCallback(async (filePath) => {
+    if (!packPath) return;
+    try {
+      const response = await window.electronAPI.readScript(filePath, packPath);
+      if (response.success) {
+        setCode(response.data);
+        setActiveFile(filePath);
+      } else {
+        showToast("Error", "No se pudo leer el archivo", "error");
+      }
+    } catch (err) {
+      console.error("[ScriptEditor] readScript error:", err);
+      showToast("Error", "Fallo al leer el script", "error");
     }
-  };
+  }, [packPath, showToast]);
 
   // 3. Función para guardar los cambios en el disco duro
-  const handleSave = async () => {
-    if (!activeFile) return;
+  const handleSave = useCallback(async () => {
+    if (!activeFile || !packPath) return;
     setIsSaving(true);
-    
-    const response = await window.electronAPI.saveScript(activeFile, code, packPath);
-    if (response.success) {
-      // Aquí puedes agregar un "toast" o notificación visual más bonita después
-      console.log("¡Guardado exitoso!");
-    } else {
-      showToast("Error al guardar", response.message, "error");
+
+    try {
+      const response = await window.electronAPI.saveScript(activeFile, code, packPath);
+      if (response.success) {
+        console.log("¡Guardado exitoso!");
+      } else {
+        showToast("Error al guardar", response.message, "error");
+      }
+    } catch (err) {
+      console.error("[ScriptEditor] saveScript error:", err);
+      showToast("Error", "Fallo al guardar el script", "error");
+    } finally {
+      setIsSaving(false);
     }
-    
-    setIsSaving(false);
-  };
+  }, [activeFile, code, packPath, showToast]);
 
   // Función recursiva básica para renderizar el árbol visualmente
   const renderTree = (nodes) => {

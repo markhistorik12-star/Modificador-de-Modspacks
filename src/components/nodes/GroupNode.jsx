@@ -1,15 +1,15 @@
 import { memo } from 'react';
 import { NodeResizer } from 'reactflow';
 
-export default memo(({ data, selected }) => {
+const GroupNode = memo(function GroupNode({ data, selected }) {
   return (
     <>
       {/* Herramienta para que el usuario pueda redimensionar el grupo manualmente si lo desea */}
-      <NodeResizer 
-        color="#00e5ff" 
-        isVisible={selected} 
-        minWidth={300} 
-        minHeight={150} 
+      <NodeResizer
+        color="#00e5ff"
+        isVisible={selected}
+        minWidth={300}
+        minHeight={150}
       />
       <div style={{
         padding: '10px 15px',
@@ -37,9 +37,11 @@ export default memo(({ data, selected }) => {
         width: '100%',
         height: '100%',
         boxSizing: 'border-box',
-        pointerEvents: 'none', // Permite que el usuario haga clic en los nodos de dentro
-        paddingTop: '45px' // Espacio para el título
+        pointerEvents: 'none',
+        paddingTop: '45px'
       }} />
     </>
   );
 });
+
+export default GroupNode;

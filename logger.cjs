@@ -2,8 +2,20 @@ const winston = require('winston');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load environment variables
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+const fs = require('fs');
+// Load environment variables from multiple possible locations (dev, packaged app, root)
+const envCandidates = [
+  path.join(__dirname, '.env'),
+  path.join(process.cwd(), '.env'),
+  path.join(__dirname, '..', '..', '.env'),
+  path.join(__dirname, '..', '..', '..', '.env')
+];
+for (const envPath of envCandidates) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    break;
+  }
+}
 
 // Define log levels
 const levels = {

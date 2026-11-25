@@ -170,7 +170,7 @@ const analyzeBottlenecks = (mods, configs, hardware) => {
     bottlenecks.ram.evidence.push(`RAM moderada: ${hardware.ram.totalGB}GB`);
   }
 
-  for (const [type, b] of Object.entries(bottlenecks)) {
+  for (const b of Object.values(bottlenecks)) {
     if (b.score >= 5) b.severity = 'critical';
     else if (b.score >= 3) b.severity = 'high';
     else if (b.score >= 2) b.severity = 'medium';

@@ -15,13 +15,14 @@ const toSearchParams = (params) => {
   return searchParams;
 };
 
-export const searchMods = ({ apiKey, query, gameVersion, modloaderId, sortField, pageSize = 50 }) => {
+export const searchMods = ({ apiKey, query, gameVersion, modloaderId, sortField, categoryId, pageSize = 50 }) => {
   const params = toSearchParams({
     gameId: 432,
     classId: 6,
-    searchFilter: encodeURIComponent(query),
+    searchFilter: query,
     modLoaderType: modloaderId,
     gameVersion,
+    categoryId,
     sortField,
     sortOrder: 'desc',
     pageSize

@@ -1,8 +1,9 @@
 const fs = require('fs').promises;
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 
-const CACHE_DIR = path.join(process.cwd(), '.modpack_assist_cache', 'search');
+const CACHE_DIR = path.join(os.tmpdir(), 'modpack-assist-cache', 'search');
 const DEFAULT_TTL_MS = 1000 * 60 * 30; // 30 minutes
 const MAX_CACHE_SIZE_MB = 50;
 const MAX_ENTRIES = 1000;
@@ -67,7 +68,7 @@ class SearchCache {
     await this.init();
     const key = this.generateKey(query, gameVersion, loader, sortBy, category);
     const entry = this.memoryCache.get(key);
-    
+
     if (!entry || !this.isValidEntry(entry)) {
       if (entry) {
         this.memoryCache.delete(key);
@@ -84,7 +85,7 @@ class SearchCache {
       entry.lastAccessed = Date.now();
       await this.saveIndex();
       return data;
-    } catch (err) {
+    } catch {
       this.memoryCache.delete(key);
       await this.deleteCacheFile(key);
       return null;
@@ -95,7 +96,7 @@ class SearchCache {
     await this.init();
     const key = this.generateKey(query, gameVersion, loader, sortBy, category);
     const timestamp = Date.now();
-    
+
     const entry = {
       key,
       query,
@@ -111,11 +112,11 @@ class SearchCache {
     try {
       const filePath = path.join(this.cacheDir, `${key}.json`);
       await fs.writeFile(filePath, JSON.stringify(data), 'utf-8');
-      
+
       this.memoryCache.set(key, entry);
       await this.enforceLimits();
       await this.saveIndex();
-      
+
       return true;
     } catch (err) {
       console.error('[SearchCache] Failed to write cache:', err.message);
@@ -124,40 +125,42 @@ class SearchCache {
   }
 
   async deleteCacheFile(key) {
+    if (!/^[a-f0-9]{32}$/.test(key)) return;
     const filePath = path.join(this.cacheDir, `${key}.json`);
     try {
       await fs.unlink(filePath);
     } catch (err) {
-      if (err.code !== 'ENOENT') return;
-      console.warn('[SearchCache] Failed to delete cache file:', err.message);
+      if (err.code !== 'ENOENT') {
+        console.warn('[SearchCache] Failed to delete cache file:', err.message);
+      }
     }
   }
 
   async enforceLimits() {
     let totalSize = 0;
     const entries = Array.from(this.memoryCache.entries());
-    
-    for (const [key, entry] of entries) {
+
+    for (const [key] of entries) {
       try {
         const filePath = path.join(this.cacheDir, `${key}.json`);
         const stats = await fs.stat(filePath);
         totalSize += stats.size;
-      } catch (err) {
+      } catch {
         this.memoryCache.delete(key);
       }
     }
 
     if (totalSize > this.maxSizeBytes || entries.length > this.maxEntries) {
-      // Sort by lastAccessed (oldest first)
       entries.sort((a, b) => a[1].lastAccessed - b[1].lastAccessed);
-      
+
       const toRemove = entries.length - Math.min(this.maxEntries, Math.floor(this.maxSizeBytes / (totalSize / entries.length || 1)));
-      for (let i = 0; i < Math.max(toRemove, entries.length * 0.2); i++) {
+      const limit = Math.min(entries.length, Math.ceil(Math.max(toRemove, entries.length * 0.2)));
+      for (let i = 0; i < limit; i++) {
         const [key] = entries[i];
         this.memoryCache.delete(key);
         await this.deleteCacheFile(key);
       }
-      
+
       await this.saveIndex();
     }
   }
@@ -167,55 +170,57 @@ class SearchCache {
     try {
       const files = await fs.readdir(this.cacheDir);
       for (const file of files) {
-        if (file !== 'index.json') {
-          await fs.unlink(path.join(this.cacheDir, file));
-        }
+        await fs.unlink(path.join(this.cacheDir, file)).catch(() => {});
       }
     } catch (err) {
-      console.warn('[SearchCache] Failed to clear:', err.message);
+      if (err.code !== 'ENOENT') {
+        console.warn('[SearchCache] Failed to clear:', err.message);
+      }
     }
   }
 
   async getStats() {
     await this.init();
     let totalSize = 0;
-    for (const [key] of this.memoryCache) {
+    const timestamps = [];
+    for (const [key, entry] of this.memoryCache) {
+      if (entry?.timestamp) timestamps.push(entry.timestamp);
       try {
         const stats = await fs.stat(path.join(this.cacheDir, `${key}.json`));
         totalSize += stats.size;
-      } catch (e) {
-        console.warn('[SearchCache] Error getting file stats:', e.message);
+      } catch {
+        // Archivo expirado o eliminado externamente
       }
     }
     return {
       entries: this.memoryCache.size,
       totalSizeBytes: totalSize,
       totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
-      oldestEntry: Math.min(...Array.from(this.memoryCache.values()).map(e => e.timestamp)),
-      newestEntry: Math.max(...Array.from(this.memoryCache.values()).map(e => e.timestamp))
+      oldestEntry: timestamps.length > 0 ? Math.min(...timestamps) : null,
+      newestEntry: timestamps.length > 0 ? Math.max(...timestamps) : null,
     };
   }
 
   async invalidate(query) {
     await this.init();
-    const prefix = query.toLowerCase();
+    const prefix = String(query || '').toLowerCase();
     const keysToDelete = [];
-    
+
     for (const [key, entry] of this.memoryCache) {
-      if (entry.query.toLowerCase().includes(prefix)) {
+      if (String(entry.query || '').toLowerCase().includes(prefix)) {
         keysToDelete.push(key);
       }
     }
-    
+
     for (const key of keysToDelete) {
       this.memoryCache.delete(key);
       await this.deleteCacheFile(key);
     }
-    
+
     if (keysToDelete.length > 0) {
       await this.saveIndex();
     }
-    
+
     return keysToDelete.length;
   }
 }

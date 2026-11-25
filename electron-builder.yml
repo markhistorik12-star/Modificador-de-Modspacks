@@ -5,6 +5,18 @@ directories:
 files:
   - "**/*"
   - "!{.env,.env.*}"
+  # Fuentes y archivos de desarrollo que no deben ir en el ejecutable
+  - "!src/**"
+  - "!tests/**"
+  - "!logs/**"
+  - "!a.js"
+  - "!descripcion.txt"
+  - "!README.md"
+  - "!eslint.config.js"
+  - "!vite.config.js"
+  - "!vitest.config.js"
+  - "!forge.config.js"
+  - "!index.html"
 win:
   target:
     - target: dir

@@ -10,9 +10,9 @@ const toSearchParams = (params) => {
   return searchParams;
 };
 
-export const searchMods = ({ query, facets, sortBy, limit = 200 }) => {
+export const searchMods = ({ query, facets, sortBy, limit = 100 }) => {
   const params = toSearchParams({
-    query: encodeURIComponent(query),
+    query,
     facets: JSON.stringify(facets),
     index: sortBy,
     limit

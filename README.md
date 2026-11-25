@@ -1,32 +1,38 @@
-# React + Vite
+# Modpack Assist
 
-Modpack Assist
+Una herramienta de escritorio moderna construida para gestionar, editar, diagnosticar y optimizar ecosistemas de mods de Minecraft de forma visual e intuitiva.
 
+## Caracteristicas principales
+* Ecosistema visual: mapeo de dependencias mediante grafos interactivos.
+* Gestion integrada: busqueda, descarga e instalacion de mods (con dependencias) desde CurseForge y Modrinth.
+* Centro de Tweaks: inyeccion de scripts KubeJS para modificar items, entidades, spawns y loot tables desde la interfaz.
+* Optimizacion inteligente: perfiles de configuracion, recomendaciones segun hardware, deteccion de cuellos de botella, backup y rollback.
+* Asistente de proyectos: creacion de modpacks para Forge, Fabric, NeoForge y Quilt.
+* Diagnostico de conflictos: analisis de compatibilidad (version, loader, dependencias) y peso del modpack.
 
-Una herramienta de escritorio moderna construida para gestionar, editar y optimizar ecosistemas de mods de Minecraft de forma visual e intuitiva. 
+## Tecnologias
+* Frontend: React 19, Vite 8, React Flow, Monaco Editor, lucide-react.
+* Desktop / backend: Electron 41, Node.js, adm-zip, @iarna/toml, systeminformation, bottleneck, winston.
+* Integraciones: CurseForge API v1, Modrinth API v2.
+* Tests: Vitest.
 
-Características Principales
-* Ecosistema Visual: Mapeo de dependencias mediante grafos interactivos.
-* Gestión Integrada: Descarga e instalación de mods conectada a la API de CurseForge y Modrinth.
-* Centro de Tweaks: Inyección de código (KubeJS) para modificar estadísticas de ítems, loot tables y spawns directamente desde la interfaz.
-* Entorno Aislado: Asistente de creación de proyectos virtuales para múltiples modloaders (Forge, Fabric, etc.).
-* Diagnóstico de Conflictos: Analizador heurístico para detectar mods incompatibles o errores críticos antes de exportar.
+## Instalacion y ejecucion local
 
-Tecnologías Utilizadas
+Requisitos: [Node.js](https://nodejs.org/).
 
-* Frontend:React, Vite, React Flow (para diagramas).
-* Backend / Desktop: Electron, Node.js.
-* Integraciones:CurseForge API.
+```
+git clone https://github.com/markhistorik12-star/Modificador-de-Modspacks.git
+npm install
+npm run start
+```
 
-Instalación y Ejecución Local
+Crea un archivo `.env` con:
+```
+CURSEFORGE_API_KEY=tu_clave
+LOG_LEVEL=info        # opcional
+LOG_TO_FILE=false     # opcional
+```
 
-Requisitos Previos
-Asegúrate de tener [Node.js](https://nodejs.org/) instalado en tu sistema.
+Otros comandos: `npm run test`, `npm run lint`, `npm run build:exe` (genera `release/win-unpacked/Modpack Assist.exe`).
 
-Pasos a seguir
-Clona el respositorio con: git clone https://github.com/markhistorik12-star/Modificador-de-Modspacks.git
-Instala las dependecias npm: npm install
-Ejecuta: npm run start
-
-
-Es mi primer proyecto, es normal que tenga errores o que el codigo que tenga algunos bugs, normalmente ire haciendole actualizaciones para seguir mejorandolo, cualquier recomendacion u observacion sera bienvenida, gracias y buenos dias, buenas tardes y buenas noches.
+Es mi primer proyecto, es normal que tenga errores o que el codigo tenga algunos bugs. Normalmente ire haciendole actualizaciones para seguir mejorandolo, cualquier recomendacion u observacion sera bienvenida, gracias y buenos dias, buenas tardes y buenas noches.

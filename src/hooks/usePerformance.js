@@ -23,7 +23,7 @@ export function usePerformance(nodes) {
     return modsOrdenados.map(mod => {
       const hasImpact = mod.impact !== null;
       const isOpt = hasImpact && mod.impact < 0;
-      const color = !hasImpact ? '#313244' : (isOpt ? '#a6e3a1' : (mod.impact > 60 ? '#f38ba8' : (mod.impact > 30 ? '#f9e2af' : '#89dceb')));
+      const color = !hasImpact ? '#2a2e36' : (isOpt ? '#00e67a' : (mod.impact > 60 ? '#ff4d6a' : (mod.impact > 30 ? '#ffc42e' : '#00e5ff')));
       const barWidth = !hasImpact ? 0 : (isOpt ? 100 : Math.min(mod.impact, 100));
       return { hasImpact, isOpt, color, barWidth };
     });

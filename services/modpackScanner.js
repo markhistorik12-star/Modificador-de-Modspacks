@@ -24,8 +24,16 @@ async function handleFolderOpen(event, knownPath) {
       properties: ['openDirectory']
     });
 
-    if (canceled) return null;
+    if (canceled || filePaths.length === 0) return null;
     rootPath = filePaths[0];
+    sec.authorizePackPath(rootPath);
+  } else {
+    // Solo permitir abrir sin dialogo si ya fue autorizada en la sesion o tiene estructura real de modpack
+    if (!sec.isAuthorizedPackPath(rootPath)) {
+      const valid = await sec.looksLikeModpackRoot(rootPath);
+      if (!valid) return null;
+      sec.authorizePackPath(rootPath);
+    }
   }
 
   const itemsInRoot = await fs.readdir(rootPath);
@@ -41,23 +49,56 @@ async function handleFolderOpen(event, knownPath) {
     console.warn('[modpackScanner] Error leyendo carpetas de apoyo:', e.message);
   }
 
+  const normalizeLoaderLabel = (raw) => {
+    const l = String(raw || 'Forge').toLowerCase();
+    if (l.includes('neoforge')) return 'NeoForge';
+    if (l.includes('quilt')) return 'Quilt';
+    if (l.includes('fabric')) return 'Fabric';
+    return 'Forge';
+  };
+
   let modpackInfo = {
     name: path.basename(rootPath),
-    gameVersion: "1.12.2",
+    gameVersion: "1.20.1",
     loader: "Forge",
     path: rootPath
   };
+
+  let foundManifestVersion = false;
 
   try {
     if (itemsInRoot.includes('minecraftinstance.json')) {
       const data = JSON.parse(await fs.readFile(path.join(rootPath, 'minecraftinstance.json'), 'utf-8'));
       modpackInfo.name = data.name || modpackInfo.name;
-      modpackInfo.gameVersion = data.gameVersion || modpackInfo.gameVersion;
-      modpackInfo.loader = data.baseModLoader?.name || "Forge";
+      if (data.gameVersion) {
+        modpackInfo.gameVersion = String(data.gameVersion).trim();
+        foundManifestVersion = true;
+      }
+      modpackInfo.loader = normalizeLoaderLabel(data.baseModLoader?.name || "Forge");
     } else if (itemsInRoot.includes('manifest.json')) {
       const data = JSON.parse(await fs.readFile(path.join(rootPath, 'manifest.json'), 'utf-8'));
       modpackInfo.name = data.name || modpackInfo.name;
-      modpackInfo.gameVersion = data.minecraft?.version || modpackInfo.gameVersion;
+      if (data.minecraft?.version) {
+        modpackInfo.gameVersion = String(data.minecraft.version).trim();
+        foundManifestVersion = true;
+      }
+      const rawLoader = data.minecraft?.modLoaders?.[0]?.id || data._appData?.loader || "Forge";
+      modpackInfo.loader = normalizeLoaderLabel(rawLoader);
+    } else if (itemsInRoot.includes('modrinth.index.json')) {
+      const data = JSON.parse(await fs.readFile(path.join(rootPath, 'modrinth.index.json'), 'utf-8'));
+      modpackInfo.name = data.name || modpackInfo.name;
+      if (data.dependencies?.minecraft) {
+        modpackInfo.gameVersion = String(data.dependencies.minecraft).trim();
+        foundManifestVersion = true;
+      }
+      if (data.dependencies?.['neoforge']) modpackInfo.loader = 'NeoForge';
+      else if (data.dependencies?.['fabric-loader']) modpackInfo.loader = 'Fabric';
+      else if (data.dependencies?.['quilt-loader']) modpackInfo.loader = 'Quilt';
+      else if (data.dependencies?.['forge']) modpackInfo.loader = 'Forge';
+    } else if (itemsInRoot.includes('instance.cfg')) {
+      const cfgText = await fs.readFile(path.join(rootPath, 'instance.cfg'), 'utf-8');
+      const nameMatch = cfgText.match(/^name=(.+)$/m);
+      if (nameMatch) modpackInfo.name = nameMatch[1].trim();
     }
   } catch (e) {
     console.warn('[modpackScanner] No se pudo leer archivo de instancia:', e.message);
@@ -67,8 +108,21 @@ async function handleFolderOpen(event, knownPath) {
     const files = await fs.readdir(modsPath);
     const jarFiles = files.filter(file => file.endsWith('.jar'));
     const modsData = [];
+    const detectedMcVersions = {};
+    const detectedLoaders = { Forge: 0, Fabric: 0, NeoForge: 0, Quilt: 0 };
 
     for (const file of jarFiles) {
+      const lowerFile = file.toLowerCase();
+      if (lowerFile.includes('neoforge')) detectedLoaders.NeoForge++;
+      else if (lowerFile.includes('fabric')) detectedLoaders.Fabric++;
+      else if (lowerFile.includes('quilt')) detectedLoaders.Quilt++;
+      else if (lowerFile.includes('forge')) detectedLoaders.Forge++;
+
+      const mcMatch = file.match(/(?:mc|minecraft|[_\-+])(1\.(?:12|16|18|19|20|21)(?:\.\d+)?)(?:[_\-+.].*|\.jar$)/i);
+      if (mcMatch) {
+        const ver = mcMatch[1];
+        detectedMcVersions[ver] = (detectedMcVersions[ver] || 0) + 1;
+      }
       const filePath = path.join(modsPath, file);
       let modName = file.replace('.jar', '');
       let modVersion = 'Desconocida';
@@ -112,7 +166,7 @@ async function handleFolderOpen(event, knownPath) {
 
         let iconEntry = zip.getEntry(expectedLogo) || zip.getEntry('icon.png') || zip.getEntry('logo.png') || zip.getEntry('pack.png');
 
-        if (iconEntry) {
+        if (iconEntry && iconEntry.header.size <= 5 * 1024 * 1024) {
           const buffer = zip.readFile(iconEntry);
           iconBase64 = `data:image/png;base64,${buffer.toString('base64')}`;
         }
@@ -121,23 +175,23 @@ async function handleFolderOpen(event, knownPath) {
       }
 
       if (modVersion === 'Desconocida') {
-        const versionMatch = file.match(/[_\-\s](v?[\d\.]+[a-zA-Z0-9-]*)\.jar$/i);
+        const versionMatch = file.match(/[_\-\s](v?[\d.]+[a-zA-Z0-9-]*)\.jar$/i);
         if (versionMatch) {
           modVersion = versionMatch[1];
           modName = modName.replace(versionMatch[0].replace('.jar', ''), '').trim();
         }
       }
 
-      const cleanModName = modName.toLowerCase().replace(/[\s_\-]/g, '');
-      const cleanModId = modId.toLowerCase().replace(/[\s_\-]/g, '');
+      const cleanModName = modName.toLowerCase().replace(/[\s_-]/g, '');
+      const cleanModId = modId.toLowerCase().replace(/[\s_-]/g, '');
 
       const relatedConfigs = configFiles.filter(cfg => {
-        const cleanCfg = cfg.toLowerCase().replace(/[\s_\-]/g, '');
+        const cleanCfg = cfg.toLowerCase().replace(/[\s_-]/g, '');
         return cleanCfg.includes(cleanModName) || cleanCfg.includes(cleanModId);
       });
 
       const relatedScripts = scriptFiles.filter(scr => {
-        const cleanScr = scr.toLowerCase().replace(/[\s_\-]/g, '');
+        const cleanScr = scr.toLowerCase().replace(/[\s_-]/g, '');
         return cleanScr.includes(cleanModName) || cleanScr.includes(cleanModId);
       });
 
@@ -149,6 +203,13 @@ async function handleFolderOpen(event, knownPath) {
         configs: relatedConfigs,
         scripts: relatedScripts
       });
+    }
+
+    if (!foundManifestVersion) {
+      const topVersion = Object.entries(detectedMcVersions).sort((a, b) => b[1] - a[1])[0];
+      if (topVersion) modpackInfo.gameVersion = topVersion[0];
+      const topLoader = Object.entries(detectedLoaders).sort((a, b) => b[1] - a[1])[0];
+      if (topLoader && topLoader[1] > 0) modpackInfo.loader = topLoader[0];
     }
 
     return { mods: modsData, info: modpackInfo, rootFiles: itemsInRoot };
